@@ -111,6 +111,54 @@ def discover():
         time.sleep(60)
 
 
+SCENES_FILE = DIR / "scenes.json"  # dado do João, fora do git
+SCENES_LOCK = threading.Lock()
+
+
+def load_scenes():
+    try:
+        return json.loads(SCENES_FILE.read_text())
+    except FileNotFoundError:
+        return []
+
+
+def save_scenes(scenes):
+    with SCENES_LOCK:  # grava num temporário e troca: um PUT no meio não deixa o arquivo pela metade
+        tmp = SCENES_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(scenes, ensure_ascii=False, indent=2))
+        tmp.replace(SCENES_FILE)
+
+
+def validate_scenes(scenes):
+    """Lista de {id, name, devices: {id_do_aparelho: {dp: valor}}}; devolve o erro ou None."""
+    if not isinstance(scenes, list):
+        return "esperado uma lista de cenas"
+    ids = set()
+    for sc in scenes:
+        if not isinstance(sc, dict) or not isinstance(sc.get("id"), str) or not isinstance(sc.get("devices"), dict):
+            return "cena esperada: {id, name, devices}"
+        if not isinstance(sc.get("name"), str) or not sc["name"].strip():
+            return "cena sem nome"
+        if sc["id"] in ids:
+            return f"id de cena repetido: {sc['id']}"
+        ids.add(sc["id"])
+        for dev, dps in sc["devices"].items():
+            if dev not in DEVS:
+                return f"aparelho desconhecido na cena {sc['name']}"
+            if err := check_dps(DEVS[dev], dps):
+                return f"{sc['name']}: {err}"
+    return None
+
+
+def run_scene(scene):
+    """Aplica a cena aparelho por aparelho (um comando cada); devolve os nomes dos que falharam."""
+    failed = []
+    for dev, dps in scene["devices"].items():
+        if dev not in CONN or refresh(dev, lambda d: d.set_multiple_values(dps), sent=dps):
+            failed.append(DEVS[dev]["name"])
+    return failed
+
+
 class Handler(BaseHTTPRequestHandler):
     def reply(self, code, body, ctype="application/json"):
         if not isinstance(body, bytes):
@@ -122,6 +170,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def body(self):
+        try:
+            return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+        except ValueError:
+            return None
+
     def do_GET(self):
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/manifest.json": ("manifest.json", "application/manifest+json"),
@@ -132,15 +186,32 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, (DIR / name).read_bytes(), ctype)
         if path == "/api/state":
             return self.reply(200, [view(DEVS[i], CACHE[i]) for i in DEVS])
+        if path == "/api/scenes":
+            return self.reply(200, load_scenes())
         self.reply(404, {"error": "não encontrado"})
 
+    def do_PUT(self):
+        if self.path != "/api/scenes":
+            return self.reply(404, {"error": "não encontrado"})
+        scenes = self.body()
+        if err := validate_scenes(scenes):
+            return self.reply(400, {"error": err})
+        save_scenes(scenes)
+        self.reply(200, scenes)
+
     def do_POST(self):
+        if self.path.startswith("/api/scenes/") and self.path.endswith("/run"):
+            sid = self.path.removeprefix("/api/scenes/").removesuffix("/run")
+            scene = next((sc for sc in load_scenes() if sc["id"] == sid), None)
+            if not scene:
+                return self.reply(404, {"error": "cena não encontrada"})
+            return self.reply(200, {"failed": run_scene(scene)})
         id = self.path.removeprefix("/api/set/")
         if id == self.path or id not in DEVS:
             return self.reply(404, {"error": "aparelho não encontrado"})
         try:
-            dps = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))["dps"]
-        except (ValueError, KeyError, TypeError):
+            dps = self.body()["dps"]
+        except (KeyError, TypeError):
             dps = None
         if err := check_dps(DEVS[id], dps):
             return self.reply(400, {"error": err})
@@ -213,6 +284,25 @@ def selftest():
     DEVS["c"], CONN["c"], CACHE["c"] = abajur, Fake(), {"online": True, "dps": {"20": False, "24": "velho"}}
     assert refresh("c", lambda dev: dev.set_multiple_values({"20": True, "24": "novo"}), sent={"20": True, "24": "novo"}) is None
     assert CACHE["c"]["dps"] == {"20": True, "24": "novo"}
+
+    # cenas: validação, gravação e execução (o aparelho "c" já está em DEVS/CONN acima)
+    ok = [{"id": "s1", "name": "Cinema", "devices": {"c": {"20": True, "21": "colour", "24": "00d7038400c8"}}}]
+    assert validate_scenes(ok) is None
+    assert validate_scenes({"id": "s1"})                                          # não é lista
+    assert validate_scenes([{"id": "s1", "name": " ", "devices": {}}])            # nome vazio
+    assert validate_scenes(ok + ok)                                               # id repetido
+    assert validate_scenes([{"id": "s2", "name": "X", "devices": {"zz": {"20": True}}}])  # aparelho que não existe
+    assert validate_scenes([{"id": "s2", "name": "X", "devices": {"c": {"21": "disco"}}}])  # DP inválido
+    assert validate_scenes([{"id": "s2", "name": "X", "devices": {"c": {}}}])    # aparelho sem estado
+    import tempfile
+    global SCENES_FILE
+    SCENES_FILE = Path(tempfile.mkdtemp()) / "scenes.json"
+    assert load_scenes() == []
+    save_scenes(ok)
+    assert load_scenes() == ok
+    assert run_scene(ok[0]) == []
+    DEVS["d"] = {**abajur, "id": "d", "name": "Sem IP"}  # aparelho que a descoberta ainda não achou
+    assert run_scene({"id": "s3", "name": "Y", "devices": {"d": {"20": True}, "c": {"20": False}}}) == ["Sem IP"]
     print("selftest ok")
 
 

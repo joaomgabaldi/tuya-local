@@ -81,6 +81,25 @@
           border-radius: 999px; padding: 8px 14px; cursor: pointer; }
   .chip.sel { background: var(--txt); color: #000; }
   .chip:active { transform: scale(.95); }
+
+  /* cenas */
+  .tile.scene { justify-content: flex-start; }
+  .tile.scene.new { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(235 235 245 / .25); color: var(--sub); }
+  input.name-input { -webkit-user-select: text; user-select: text; box-sizing: border-box; width: 100%;
+         font: inherit; font-size: 20px; color: inherit; background: var(--chip); border: 0; border-radius: 12px;
+         padding: 12px 14px; margin-top: 8px; }
+  .row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid rgb(84 84 88 / .35); cursor: pointer; }
+  .row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .muted { color: var(--sub); font-size: 15px; white-space: nowrap; }
+  .row.add { color: var(--accent); border-bottom: 0; }
+  .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgb(235 235 245 / .35); }
+  .actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 22px; }
+  .actions .primary { margin-left: auto; }
+  .btn { font: inherit; border: 0; border-radius: 12px; padding: 12px 18px; background: var(--chip); color: var(--txt); cursor: pointer; }
+  .btn.primary { background: var(--accent); color: #000; font-weight: 600; }
+  .btn.danger { color: #ff6961; }
+  .btn.link { background: none; color: var(--accent); padding: 4px 0; margin-top: 4px; }
+  .btn.x { background: none; color: var(--sub); padding: 8px; }
 </style>
 </head>
 <body>
@@ -94,7 +113,7 @@
   <div id="c-body"></div>
 </div>
 <script type="module">
-import {readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, EFFECTS} from '/codec.js';
+import {readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, stateDps, EFFECTS} from '/codec.js';
 
 const COLORS = [[0, 900], [28, 950], [50, 950], [120, 700], [185, 800], [215, 900], [270, 750], [320, 800]];  // h, s
 const WHITES = [[0, '#ffc98a'], [30, '#ffe0b8'], [60, '#fff4e6'], [100, '#e6efff']];  // temperatura %, cor na tela
@@ -105,9 +124,11 @@ const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.crea
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const isLight = it => it.group === 'Lâmpadas' || it.group === 'Fitas LED';
 const byId = id => last.find(x => x.id === id);
-let last = [], pressing = false;
-let current = null;     // id do aparelho com o cartão aberto
-let hiddenTile = null;  // id do bloco escondido enquanto "vira" o cartão (abrir e fechar)
+let last = [], scenes = [], pressing = false;
+// cartão aberto: {kind: 'device', key, id} ou {kind: 'scene', key, draft, isNew, sub, adding}.
+// key = data-id do bloco de onde o cartão nasceu (e para onde volta ao fechar)
+let current = null;
+let hiddenTile = null;  // key do bloco escondido enquanto "vira" o cartão (abrir e fechar)
 
 function colorOf(it) {
   if (!isLight(it)) return 'var(--accent)';
@@ -139,10 +160,13 @@ async function load() {
     last = await r.json();
     if (!outbox.size) showError('');
     render();
-    if (current) $('c-sub').textContent = status(byId(current));
+    if (current?.kind === 'device') $('c-sub').textContent = status(byId(current.id));
   } catch (e) {
     showError('Sem conexão com o servidor');
   }
+}
+async function loadScenes() {
+  try { scenes = await (await fetch('/api/scenes')).json(); render(); } catch (e) { showError('Sem conexão com o servidor'); }
 }
 
 // fila por aparelho: no máximo uma escrita em andamento; o que chega nesse meio tempo é juntado e vai
@@ -177,36 +201,67 @@ async function flush(id) {
   box.done.forEach(f => f());
 }
 
+const running = new Set();  // cenas sendo aplicadas
+async function runScene(sc) {
+  if (running.has(sc.id)) return;
+  running.add(sc.id);
+  render();
+  try {
+    const r = await fetch(`/api/scenes/${sc.id}/run`, {method: 'POST'});
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error);
+    const n = Object.keys(sc.devices).length;
+    showError(body.failed.length ? `${sc.name}: ${body.failed.length} de ${n} falharam (${body.failed.join(', ')})` : '');
+  } catch (e) {
+    showError(`${sc.name}: ${e.message}`);
+  }
+  running.delete(sc.id);
+  await load();
+}
+
 // ---- grade ----
+function tile(key, cls, onTap, onHold) {
+  const t = el('div', {role: 'button', tabIndex: 0, className: ['tile', ...cls].filter(Boolean).join(' ')});
+  t.dataset.id = key;
+  if (key === hiddenTile) t.style.visibility = 'hidden';  // poll no meio da animação não pode revelar o bloco
+  if (onTap) longPress(t, onTap, onHold);
+  return t;
+}
 function render() {
   if (pressing) return;  // re-render no meio do toque e segure perderia o gesto
   $('app').replaceChildren();
+  const section = (title) => { const g = el('div', {className: 'grid'}); $('app').append(el('h2', {textContent: title}), g); return g; };
+
+  const sg = section('Cenas');
+  for (const sc of scenes) {
+    const t = tile('scene:' + sc.id, ['scene', running.has(sc.id) && 'on busy'],
+                     () => runScene(sc), () => openScene(sc));
+    t.append(el('div', {className: 'txt'}, el('div', {className: 'name', textContent: sc.name})));
+    sg.append(t);
+  }
+  const nt = tile('scene:new', ['scene', 'new'], () => openScene(null), () => openScene(null));
+  nt.append(el('div', {className: 'txt'}, el('div', {className: 'name', textContent: '＋ Nova'})));
+  sg.append(nt);
+
   let grid;
   for (const it of last) {
-    if (!grid || grid.dataset.group !== it.group) {
-      grid = el('div', {className: 'grid'});
-      grid.dataset.group = it.group;
-      $('app').append(el('h2', {textContent: it.group}), grid);
-    }
-    const t = el('div', {role: 'button', tabIndex: 0},
-      el('div', {className: 'icon', textContent: iconOf(it)}),
-      el('div', {className: 'txt'}, el('div', {className: 'name', textContent: it.name}),
-                                    el('div', {className: 'sub', textContent: status(it)})));
-    t.className = ['tile', it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy'].filter(Boolean).join(' ');
+    if (!grid || grid.dataset.group !== it.group) { grid = section(it.group); grid.dataset.group = it.group; }
+    const t = tile(it.id, [it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy'],
+                     it.online && (() => send(it, {[it.dp]: !it.on})), () => openDevice(it.id));
+    t.append(el('div', {className: 'icon', textContent: iconOf(it)}),
+             el('div', {className: 'txt'}, el('div', {className: 'name', textContent: it.name}),
+                                          el('div', {className: 'sub', textContent: status(it)})));
     t.setAttribute('aria-pressed', String(!!it.on));
     const dot = colorOf(it);
     t.style.setProperty('--dot', dot.startsWith('linear') ? '#ffc371' : dot);
-    t.dataset.id = it.id;
-    if (it.id === hiddenTile) t.style.visibility = 'hidden';  // poll no meio da animação não pode revelar o bloco
-    if (it.online) longPress(t, () => send(it, {[it.dp]: !it.on}), () => openCard(it.id));
     grid.append(t);
   }
 }
-const tileOf = id => document.querySelector(`.tile[data-id="${id}"]`);
-function hideTile(id) { hiddenTile = id; tileOf(id).style.visibility = 'hidden'; }
+const tileOf = key => document.querySelector(`.tile[data-id="${key}"]`);
+function hideTile(key) { hiddenTile = key; tileOf(key).style.visibility = 'hidden'; }
 function showTile() { const t = hiddenTile && tileOf(hiddenTile); hiddenTile = null; if (t) t.style.visibility = ''; }
 
-// toque curto = alterna; segurar 500 ms = expande. Mexer o dedo > 10 px (rolagem) cancela.
+// toque curto = onTap; segurar 500 ms = onHold. Mexer o dedo > 10 px (rolagem) cancela.
 function longPress(t, onTap, onHold) {
   let timer, held, x0, y0;
   const cancel = () => { clearTimeout(timer); t.classList.remove('pressing'); pressing = false; };
@@ -240,30 +295,34 @@ function lockScroll(on) {
   card.style.touchAction = on && card.scrollHeight <= card.clientHeight ? 'pan-x' : '';
 }
 
-function openCard(id) {
-  current = id;
+function openCard(state) {
+  current = state;
   $('c-erro').textContent = '';
   renderCard();
   $('overlay').hidden = $('card').hidden = false;
   lockScroll(true);
-  const from = tileOf(id).getBoundingClientRect();
+  const key = state.key;
+  const from = tileOf(key).getBoundingClientRect();
   const grow = $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
                                  {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
   for (const part of contentParts())
     part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
   document.documentElement.classList.add('blurred');
-  hideTile(id);
+  hideTile(key);
   // o bloco some só enquanto "vira" o cartão; parado, ele volta desfocado atrás
-  grow.onfinish = () => { if (current === id) showTile(); };
+  grow.onfinish = () => { if (current === state) showTile(); };
 }
+const openDevice = id => openCard({kind: 'device', key: id, id});
 
 function closeCard(fromY = 0) {
-  const id = current;
-  if (!id) return;
+  if (!current) return;
+  let key = current.key;
   current = null;
-  hiddenTile = id;
-  render();  // o bloco já reflete o que mudou no cartão (e nasce escondido)
-  const to = tileOf(id).getBoundingClientRect();
+  $('card').querySelector('input:focus')?.blur();  // fecha o teclado do nome da cena
+  render();  // o bloco já reflete o que mudou no cartão
+  if (!tileOf(key)) key = 'scene:new';  // cena excluída: volta para o "＋ Nova"
+  hideTile(key);
+  const to = tileOf(key).getBoundingClientRect();
   const card = $('card');
   card.style.transform = '';
   const start = fromY ? `translateY(${fromY}px)` : 'none';
@@ -300,50 +359,68 @@ $('overlay').addEventListener('click', () => closeCard());
   });
 })();
 
-// manda o comando e redesenha o cartão com a resposta do aparelho
-const act = (it, dps) => send(it, dps, () => { if (current === it.id) renderCard(); });
-
 function renderCard() {
-  const it = byId(current);
+  $('c-body').replaceChildren();
+  if (current.kind === 'device') renderDevice(liveTarget(current.id));
+  else renderScene();
+  if (!$('card').hidden) lockScroll(true);  // o conteúdo mudou de altura: rever se o cartão rola
+}
+
+// ---- controles de um aparelho ----
+// `tg` é o destino dos controles: o aparelho de verdade (liveTarget) ou o rascunho de uma cena (draftTarget).
+//   tg.get()      estado atual do item
+//   tg.apply(dps) comando pontual (cor, efeito, ⏻...) e redesenha o cartão depois
+//   tg.drag(dps)  comando contínuo (arrasto, cor livre): sem redesenhar
+//   tg.dragEnd()  fim do arrasto
+const redraw = () => { if (current) renderCard(); };
+const liveTarget = id => ({
+  timer: true,
+  get: () => byId(id),
+  apply: dps => send(byId(id), dps, redraw),
+  drag: dps => send(byId(id), dps),
+  dragEnd: () => send(byId(id), {}, redraw),
+});
+
+function renderDevice(tg, extra = []) {
+  const it = tg.get();
   $('c-name').textContent = it.name;
   $('c-sub').textContent = status(it);
   const body = $('c-body');
-  body.replaceChildren();
-
+  body.append(...extra);
   if (isLight(it)) {
     const l = readLight(it);
-    body.append(brightPill(it));
+    body.append(brightPill(tg));
     body.append(el('div', {className: 'row-title', textContent: 'Cores'}), swatchRow(
       COLORS.map(([h, s]) => ({c: `hsl(${h} ${s / 10}% 58%)`, sel: l.mode === 'colour' && l.h === h && l.s === s,
-                               pick: () => act(it, colourCmd(it, h, s))})), it));
+                               pick: () => tg.apply(colourCmd(tg.get(), h, s))})), tg));
     if (it.codes.temp_value_v2) {
       body.append(el('div', {className: 'row-title', textContent: 'Branco'}), swatchRow(
         WHITES.map(([temp, c]) => ({c, sel: l.mode === 'white' && Math.abs(l.temp - temp) <= 5,
-                                    pick: () => act(it, whiteCmd(it, temp))}))));
+                                    pick: () => tg.apply(whiteCmd(tg.get(), temp))}))));
     }
     body.append(el('div', {className: 'row-title', textContent: 'Efeitos'}), chipRow(effectsFor(it).map(([i, e]) => ({
-      label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => act(it, effectCmd(it, i))}))));
+      label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))));
   } else {
     const b = el('button', {className: 'power' + (it.on ? ' on' : ''), textContent: '⏻', ariaLabel: 'Liga/desliga'});
     b.setAttribute('aria-pressed', String(!!it.on));
-    b.onclick = () => act(it, {[it.dp]: !it.on});
+    b.onclick = () => tg.apply({[it.dp]: !tg.get().on});
     body.append(b);
   }
-  if (it.timer_dp) {
+  if (tg.timer && it.timer_dp) {
     const left = Math.ceil((it.dps[it.timer_dp] || 0) / 60);
     const label = left ? `${it.on ? 'Desliga' : 'Liga'} em ${left} min` : (it.on ? 'Desligar em' : 'Ligar em');
-    const opts = TIMERS.map(m => ({label: m < 60 ? `${m} min` : `${m / 60} h`, pick: () => act(it, {[it.timer_dp]: m * 60})}));
-    if (left) opts.push({label: 'Cancelar', pick: () => act(it, {[it.timer_dp]: 0})});
+    const opts = TIMERS.map(m => ({label: m < 60 ? `${m} min` : `${m / 60} h`, pick: () => tg.apply({[it.timer_dp]: m * 60})}));
+    if (left) opts.push({label: 'Cancelar', pick: () => tg.apply({[it.timer_dp]: 0})});
     body.append(el('div', {className: 'row-title', textContent: '⏱ ' + label}), chipRow(opts));
   }
 }
 
-function brightPill(it) {
+function brightPill(tg) {
   const fill = el('div', {className: 'fill'});
   const p = el('div', {className: 'pill'}, fill, el('div', {className: 'ico', textContent: '☀︎'}));
-  const l = readLight(it);
+  const it = tg.get(), l = readLight(it);
   let pct = it.on ? l.bright : 0;
-  const paint = () => { fill.style.height = pct + '%'; p.style.setProperty('--fill', colorOf(byId(it.id))); };
+  const paint = () => { fill.style.height = pct + '%'; p.style.setProperty('--fill', colorOf(tg.get())); };
   paint();
   let y0 = null, v0, moved;
   p.addEventListener('pointerdown', e => { y0 = e.clientY; v0 = pct; moved = false; p.setPointerCapture(e.pointerId); });
@@ -353,37 +430,37 @@ function brightPill(it) {
     if (Math.abs(dv) > 1) moved = true;
     if (!moved) return;
     pct = Math.round(clamp(v0 + dv, 0, 100));
+    tg.drag(brightCmd(tg.get(), pct));
     paint();
     $('c-sub').textContent = pct ? `${pct}%` : '';
-    send(byId(it.id), brightCmd(byId(it.id), pct));
   });
   p.addEventListener('pointerup', () => {
-    if (y0 !== null && !moved) act(it, {[it.dp]: !it.on});  // toque sem arrastar = liga/desliga
-    else if (y0 !== null) send(it, {}, () => { if (current === it.id) renderCard(); });  // redesenha ao terminar a fila
+    if (y0 !== null && !moved) tg.apply({[it.dp]: !tg.get().on});  // toque sem arrastar = liga/desliga
+    else if (y0 !== null) tg.dragEnd();
     y0 = null;
   });
   return p;
 }
 
-function swatchRow(items, it) {
+function swatchRow(items, tg) {
   const row = el('div', {className: 'swatches'});
   for (const s of items) {
     const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: s.pick});
     b.style.setProperty('--c', s.c);
     row.append(b);
   }
-  if (it) {  // cor livre
+  if (tg) {  // cor livre
     const input = el('input', {type: 'color', value: '#ff8800'});
     const label = el('label', {className: 'sw custom', title: 'Outra cor'}, input);
     // aplica só quando o seletor fecha ('change'): a janela do iOS já mostra a cor escolhida enquanto arrasta.
-    // e sem renderCard() aqui: recriar o input preso ao seletor nativo derrubava o Safari (SIGABRT).
+    // e sem redesenhar aqui (tg.drag): recriar o input preso ao seletor nativo derrubava o Safari (SIGABRT).
     input.addEventListener('change', () => {
       const [r, g, b] = [1, 3, 5].map(i => parseInt(input.value.slice(i, i + 2), 16) / 255);
       const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
       const h = c === 0 ? 0 : max === r ? 60 * (((g - b) / c) % 6) : max === g ? 60 * ((b - r) / c + 2) : 60 * ((r - g) / c + 4);
       $('card').querySelectorAll('.sw.sel').forEach(x => x.classList.remove('sel'));
       label.classList.add('sel');
-      send(byId(it.id), colourCmd(byId(it.id), Math.round((h + 360) % 360), Math.round(max ? c / max * 1000 : 0)));
+      tg.drag(colourCmd(tg.get(), Math.round((h + 360) % 360), Math.round(max ? c / max * 1000 : 0)));
     });
     row.append(label);
   }
@@ -396,7 +473,101 @@ function chipRow(items) {
   return row;
 }
 
-document.addEventListener('selectstart', e => e.preventDefault());  // reforço do user-select: none no iOS
+// ---- cenas: editor ----
+// rascunho de um aparelho dentro da cena: cópia do item com os DPs da cena por cima; nunca fala com a casa
+function draftOf(it, dps = {}) {
+  const d = {...it, online: true, watts: null, timer_dp: null, dps: {...it.dps, ...dps}};
+  Object.defineProperty(d, 'on', {get() { return !!this.dps[this.dp]; }});
+  return d;
+}
+const draftTarget = d => ({
+  get: () => d,
+  apply: dps => { Object.assign(d.dps, dps); redraw(); },
+  drag: dps => { Object.assign(d.dps, dps); },
+  dragEnd: redraw,
+});
+
+function openScene(sc) {
+  const devices = {};
+  for (const [id, dps] of Object.entries(sc?.devices ?? {})) if (byId(id)) devices[id] = draftOf(byId(id), dps);
+  openCard({kind: 'scene', key: sc ? 'scene:' + sc.id : 'scene:new', isNew: !sc, sub: null, adding: false,
+            draft: {id: sc?.id ?? Date.now().toString(36), name: sc?.name ?? '', devices}});
+}
+
+const btn = (text, cls, onclick) => el('button', {className: 'btn ' + cls, textContent: text, onclick});
+function summaryOf(d) { return d.on ? status(d) || 'ligado' : 'desligado'; }
+
+function renderScene() {
+  const st = current, draft = st.draft, body = $('c-body');
+  const back = btn('‹ Voltar', 'link', () => { st.sub = null; st.adding = false; redraw(); });
+
+  if (st.sub) {  // editando um aparelho da cena: os mesmos controles do cartão, apontando para o rascunho
+    const remove = btn('Remover da cena', 'danger', () => { delete draft.devices[st.sub]; st.sub = null; redraw(); });
+    renderDevice(draftTarget(draft.devices[st.sub]), [back]);
+    body.append(el('div', {className: 'actions'}, remove));
+    return;
+  }
+  $('c-name').textContent = st.isNew ? 'Nova cena' : draft.name;
+  $('c-sub').textContent = '';
+
+  if (st.adding) {
+    body.append(back, el('div', {className: 'row-title', textContent: 'Adicionar aparelho'}));
+    for (const it of last.filter(x => !draft.devices[x.id])) {
+      body.append(el('div', {className: 'row', onclick: () => {
+        draft.devices[it.id] = draftOf(it);  // entra com o estado de agora
+        st.adding = false;
+        st.sub = it.id;
+        redraw();
+      }}, el('div', {className: 'grow', textContent: it.name}), el('div', {className: 'muted', textContent: it.group})));
+    }
+    return;
+  }
+
+  const name = el('input', {className: 'name-input', type: 'text', value: draft.name, placeholder: 'Nome da cena', maxLength: 40});
+  name.addEventListener('input', () => { draft.name = name.value; });
+  body.append(name, el('div', {className: 'row-title', textContent: 'Aparelhos'}));
+  for (const [id, d] of Object.entries(draft.devices)) {
+    const dot = el('span', {className: 'dot'});
+    dot.style.background = d.on ? colorOf(d) : 'transparent';
+    const x = btn('✕', 'x', e => { e.stopPropagation(); delete draft.devices[id]; redraw(); });
+    x.ariaLabel = `Remover ${d.name}`;
+    body.append(el('div', {className: 'row', onclick: () => { st.sub = id; redraw(); }},
+      dot, el('div', {className: 'grow', textContent: d.name}), el('div', {className: 'muted', textContent: summaryOf(d) + ' ›'}), x));
+  }
+  body.append(el('div', {className: 'row add', onclick: () => { st.adding = true; redraw(); }, textContent: '＋ Adicionar aparelho'}));
+
+  const actions = el('div', {className: 'actions'});
+  if (!st.isNew) actions.append(btn('Excluir', 'danger', async () => {
+    if (!confirm(`Excluir a cena "${draft.name}"?`)) return;
+    if (await saveScenes(scenes.filter(sc => sc.id !== draft.id))) closeCard();
+  }));
+  actions.append(btn('Salvar', 'primary', async () => {
+    if (!draft.name.trim()) return showError('Dê um nome à cena');
+    if (!Object.keys(draft.devices).length) return showError('Adicione pelo menos um aparelho');
+    const sc = {id: draft.id, name: draft.name.trim(),
+                devices: Object.fromEntries(Object.entries(draft.devices).map(([id, d]) => [id, stateDps(d)]))};
+    const next = st.isNew ? [...scenes, sc] : scenes.map(x => x.id === sc.id ? sc : x);
+    if (await saveScenes(next)) closeCard();
+  }));
+  body.append(actions);
+}
+
+async function saveScenes(next) {
+  try {
+    const r = await fetch('/api/scenes', {method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(next)});
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error);
+    scenes = body;
+    showError('');
+    return true;
+  } catch (e) {
+    showError(`Não salvou: ${e.message}`);
+    return false;
+  }
+}
+
+// reforço do user-select: none no iOS, menos no campo de nome da cena
+document.addEventListener('selectstart', e => { if (!e.target.closest?.('input')) e.preventDefault(); });
 
 let timer;
 function start() {
@@ -404,6 +575,7 @@ function start() {
   if (!document.hidden) { load(); timer = setInterval(load, 5000); }
 }
 document.addEventListener('visibilitychange', start);
+loadScenes();
 start();
 </script>
 </body>

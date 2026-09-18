@@ -5,3 +5,4 @@ tuya-raw.json
 snapshot.json
 .venv/
 __pycache__/
+scenes.json

@@ -1,6 +1,6 @@
 // node codec.test.mjs — testa a tradução entre os DPs crus e o que a página mostra/manda
 import assert from 'node:assert/strict';
-import {hsvHex, parseHsv, readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, EFFECTS} from './codec.js';
+import {hsvHex, parseHsv, readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, stateDps, EFFECTS} from './codec.js';
 
 const lamp = {dp: '20', codes: {switch_led: '20', work_mode: '21', bright_value_v2: '22', temp_value_v2: '23',
   colour_data_v2: '24', scene_data_v2: '25'}};
@@ -43,5 +43,14 @@ assert.deepEqual(effectCmd(strip, 5), {'20': true, '21': 'scene', '25': EFFECTS[
 // fita não tem branco regulável: só os efeitos coloridos
 assert.deepEqual(effectsFor(strip).map(([i]) => i), [4, 5, 6, 7]);
 assert.deepEqual(effectsFor(lamp).map(([i]) => i), [0, 1, 2, 3, 4, 5, 6, 7]);
+
+// o que uma cena guarda: só o estado, e o DP de cena só em modo cena (a fita entra em modo cena com qualquer
+// escrita nele, mesmo junto de work_mode=colour)
+const full = {'20': true, '21': 'colour', '22': 700, '23': 300, '24': '00d7038401f4', '25': EFFECTS[7].data};
+assert.deepEqual(stateDps({...lamp, on: true, dps: full}), {'20': true, '21': 'colour', '24': '00d7038401f4'});
+assert.deepEqual(stateDps({...lamp, on: true, dps: {...full, '21': 'white'}}), {'20': true, '21': 'white', '22': 700, '23': 300});
+assert.deepEqual(stateDps({...strip, on: true, dps: {...full, '21': 'scene'}}), {'20': true, '21': 'scene', '25': EFFECTS[7].data});
+assert.deepEqual(stateDps({...lamp, on: false, dps: {...full, '20': false}}), {'20': false});
+assert.deepEqual(stateDps({dp: '1', codes: {switch_1: '1'}, on: true, dps: {'1': true, '9': 300}}), {'1': true});
 
 console.log('codec ok');

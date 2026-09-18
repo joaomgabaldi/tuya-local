@@ -52,6 +52,16 @@ export function effectCmd(it, i) {
   return {[d.sw]: true, [d.mode]: 'scene', [d.scene]: EFFECTS[i].data};
 }
 
+// o que uma cena guarda de um aparelho: só o estado. O DP de cena entra só em modo cena, porque a fita
+// entra em modo cena com qualquer escrita nele, mesmo junto de work_mode=colour.
+export function stateDps(it) {
+  const d = dpsOf(it), v = it.dps, on = !!v[d.sw];
+  if (!on || !d.mode) return {[d.sw]: on};
+  const mode = v[d.mode] ?? 'colour';
+  const keep = {white: [d.bright, d.temp], colour: [d.colour], scene: [d.scene]}[mode] ?? [];
+  return Object.fromEntries([[d.sw, true], [d.mode, mode], ...keep.filter(k => k && k in v).map(k => [k, v[k]])]);
+}
+
 // um passo de cena: velocidade de troca, velocidade do gradiente, modo (0 estático, 1 salto, 2 gradiente),
 // h, s, v (cor) e brilho/temperatura (branco), cada número em hex de 4 dígitos
 const unit = (mode, {h = 0, s = 0, v = 0, bright = 0, temp = 0}, speed = [0x46, 0x46]) =>

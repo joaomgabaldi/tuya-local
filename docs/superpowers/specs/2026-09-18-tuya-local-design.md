@@ -133,6 +133,25 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   de login. Se um dia a tailnet for compartilhada, o controle é pelas ACLs
   do Tailscale, não pela página.
 
+## Cenas da casa (desenho aprovado em 2026-09-18)
+
+- **Página:** seção "Cenas" no topo, com blocos só com o nome (sem ícone,
+  decisão do João) e um "＋ Nova" no fim. Tocar ativa a cena; segurar abre
+  o editor no cartão expandido.
+- **Editor completo:** nome, lista de aparelhos com o estado de cada um,
+  "＋ Adicionar aparelho" (entra com o estado atual), ✕ para remover,
+  Excluir e Salvar. Tocar num aparelho abre **os mesmos controles do
+  cartão** (pílula, cores, branco, efeitos, ⏻), mas escrevendo num
+  rascunho, sem mexer na casa. Timer não entra em cena.
+- **O que a cena guarda por aparelho:** só os DPs do estado, via
+  `stateDps()` do `codec.js`. Desligado guarda só o liga/desliga. Cena
+  (DP 25) só é salva quando o modo é cena, porque a fita entra em modo
+  cena com qualquer escrita nesse DP.
+- **Servidor:** `scenes.json` na pasta (dado, fora do git).
+  `GET/PUT /api/scenes` com a lista inteira, validada com o `check_dps`
+  de cada aparelho. `POST /api/scenes/<id>/run` aplica aparelho por
+  aparelho e devolve `{"failed": [nomes]}`.
+
 ## Operação
 
 - Unit `/etc/systemd/system/tuya-local.service`: `User=joao`,
