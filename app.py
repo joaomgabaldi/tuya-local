@@ -2,7 +2,10 @@
 """Página de liga/desliga dos aparelhos Tuya pela LAN (spec em docs/superpowers/specs)."""
 import sys
 import json
+import sqlite3
 import threading
+from contextlib import closing
+from urllib.parse import parse_qs, urlsplit
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -96,7 +99,56 @@ def poll():
     while True:
         for id in list(CONN):
             refresh(id, lambda dev: dev.status())
+            v = view(DEVS[id], CACHE[id])
+            if v["online"] and v["watts"] is not None:
+                try:
+                    record(id, v["watts"], time.time())
+                except sqlite3.Error as e:  # disco cheio/travado não pode parar o poll dos aparelhos
+                    print(f"histórico: {e}", flush=True)
         time.sleep(POLL_EVERY)
+
+
+# histórico de consumo: média por minuto por tomada, no mesmo padrão do /opt/scripts/telemetria.db
+HISTORY_DB = DIR / "history.db"  # dado, fora do git
+RANGES = {"24h": (86400, 300), "7d": (7 * 86400, 3600), "30d": (30 * 86400, None)}  # janela, balde (None = por dia)
+_minute = {}  # id → [início do minuto, soma dos watts, amostras]
+
+
+def db():
+    c = sqlite3.connect(HISTORY_DB)
+    c.execute("CREATE TABLE IF NOT EXISTS power (device TEXT, ts INTEGER, watts REAL, PRIMARY KEY (device, ts)) WITHOUT ROWID")
+    return c
+
+
+def record(id, watts, now):
+    """Acumula a amostra no minuto corrente; quando o minuto vira, grava a média do anterior."""
+    m = int(now) - int(now) % 60
+    cur = _minute.get(id)
+    if cur and cur[0] != m:
+        with closing(db()) as c, c:
+            c.execute("INSERT OR REPLACE INTO power VALUES (?, ?, ?)", (id, cur[0], cur[1] / cur[2]))
+        cur = None
+    if not cur:
+        cur = _minute[id] = [m, 0.0, 0]
+    cur[1] += watts
+    cur[2] += 1
+
+
+def history(id, rng, now):
+    """24h e 7d: média de watts por balde; 30d: kWh por dia (horário local). kWh = soma das médias por minuto / 60."""
+    span, bucket = RANGES[rng]
+    since = int(now) - span
+    with closing(db()) as c:
+        kwh, avg = c.execute("SELECT COALESCE(SUM(watts), 0) / 60.0 / 1000, AVG(watts) FROM power WHERE device = ? AND ts >= ?",
+                             (id, since)).fetchone()
+        if bucket:
+            pts = c.execute("SELECT ts - ts % ?, AVG(watts) FROM power WHERE device = ? AND ts >= ? GROUP BY 1 ORDER BY 1",
+                            (bucket, id, since)).fetchall()
+        else:
+            pts = c.execute("SELECT date(ts, 'unixepoch', 'localtime'), SUM(watts) / 60.0 / 1000 FROM power "
+                            "WHERE device = ? AND ts >= ? GROUP BY 1 ORDER BY 1", (id, since)).fetchall()
+    return {"range": rng, "unit": "W" if bucket else "kWh", "points": [list(p) for p in pts],
+            "kwh": kwh, "avg_w": None if avg is None else round(avg, 1)}
 
 
 def discover():
@@ -188,6 +240,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [view(DEVS[i], CACHE[i]) for i in DEVS])
         if path == "/api/scenes":
             return self.reply(200, load_scenes())
+        if path.startswith("/api/history/"):
+            id = path.removeprefix("/api/history/")
+            rng = parse_qs(urlsplit(self.path).query).get("range", ["24h"])[0]
+            if id not in DEVS:
+                return self.reply(404, {"error": "aparelho não encontrado"})
+            if rng not in RANGES:
+                return self.reply(400, {"error": f"range: {', '.join(RANGES)}"})
+            return self.reply(200, history(id, rng, time.time()))
         self.reply(404, {"error": "não encontrado"})
 
     def do_PUT(self):
@@ -303,6 +363,23 @@ def selftest():
     assert run_scene(ok[0]) == []
     DEVS["d"] = {**abajur, "id": "d", "name": "Sem IP"}  # aparelho que a descoberta ainda não achou
     assert run_scene({"id": "s3", "name": "Y", "devices": {"d": {"20": True}, "c": {"20": False}}}) == ["Sem IP"]
+
+    # histórico: média por minuto, gravada quando o minuto vira; kWh integrando a potência
+    global HISTORY_DB
+    HISTORY_DB = Path(tempfile.mkdtemp()) / "history.db"
+    t0 = 1_789_700_000 - 1_789_700_000 % 86400 + 3 * 3600  # 00:00 em -03 (servidor em America/Sao_Paulo)
+    for t in range(t0, t0 + 60, 10):
+        record("pc", 60.0, t)                    # minuto inteiro a 60 W
+    record("pc", 120.0, t0 + 60)                 # virou o minuto: grava o anterior (60 W) e começa outro
+    record("pc", 180.0, t0 + 70)
+    record("pc", 0.0, t0 + 120)                  # grava o segundo minuto: média 150 W
+    h = history("pc", "24h", now=t0 + 130)
+    assert h["unit"] == "W" and h["points"] == [[t0, 105.0]]  # os dois minutos caem no mesmo balde de 5 min
+    assert abs(h["kwh"] - (60 + 150) / 60 / 1000) < 1e-9 and h["avg_w"] == 105.0
+    d = history("pc", "30d", now=t0 + 130)
+    assert d["unit"] == "kWh" and len(d["points"]) == 1 and abs(d["points"][0][1] - h["kwh"]) < 1e-9
+    assert history("pc", "24h", now=t0 + 3 * 86400)["points"] == []  # fora da janela
+    assert history("repelente", "7d", now=t0)["kwh"] == 0
     print("selftest ok")
 
 

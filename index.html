@@ -100,6 +100,21 @@
   .btn.danger { color: #ff6961; }
   .btn.link { background: none; color: var(--accent); padding: 4px 0; margin-top: 4px; }
   .btn.x { background: none; color: var(--sub); padding: 8px; }
+
+  /* histórico: série única em âmbar validado contra o cartão escuro (#b88600, L 0.48–0.67, contraste ≥ 3:1) */
+  .hist { --chart: #b88600; }
+  .hist-stats { font-size: 17px; font-weight: 600; margin: 12px 0 2px; }
+  .hist-readout { font-size: 14px; color: var(--sub); min-height: 1.3em; font-variant-numeric: tabular-nums; }
+  svg.chart { display: block; width: 100%; height: auto; margin-top: 6px; touch-action: none; overflow: visible; }
+  svg.chart .grid { stroke: rgb(84 84 88 / .45); stroke-width: 1; }
+  svg.chart .tick { fill: var(--sub); font-size: 10px; font-variant-numeric: tabular-nums; }
+  svg.chart .line { fill: none; stroke: var(--chart); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  svg.chart .area { fill: var(--chart); fill-opacity: .1; stroke: none; }
+  svg.chart .bar { fill: var(--chart); transition: opacity .15s; }
+  svg.chart .bar.dim { opacity: .35; }
+  svg.chart .cross { stroke: var(--sub); stroke-width: 1; }
+  svg.chart .dot-mark { fill: var(--chart); stroke: var(--card-solid, #1c1c1e); stroke-width: 2; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -413,6 +428,7 @@ function renderDevice(tg, extra = []) {
     if (left) opts.push({label: 'Cancelar', pick: () => tg.apply({[it.timer_dp]: 0})});
     body.append(el('div', {className: 'row-title', textContent: '⏱ ' + label}), chipRow(opts));
   }
+  if (tg.timer && it.watts != null) body.append(historySection(it));  // tomadas: só no cartão real, não no editor de cena
 }
 
 function brightPill(tg) {
@@ -471,6 +487,133 @@ function chipRow(items) {
   const row = el('div', {className: 'chips'});
   for (const c of items) row.append(el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label, onclick: c.pick}));
   return row;
+}
+
+// ---- histórico de consumo (tomadas) ----
+const RANGE_LABEL = {'24h': '24 h', '7d': '7 dias', '30d': '30 dias'};
+const num = (v, d = 1) => v.toLocaleString('pt-BR', {minimumFractionDigits: d, maximumFractionDigits: d});
+const svgEl = (tag, attrs = {}) => { const e = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
+const niceMax = v => { if (!(v > 0)) return 1; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].find(m => m * p >= v) * p; };
+
+function historySection(it) {
+  const range = current.range ??= '24h';
+  const wrap = el('div', {className: 'hist'});
+  const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === range,
+    pick: () => { current.range = k; redraw(); }})));
+  const stats = el('div', {className: 'hist-stats'}), readout = el('div', {className: 'hist-readout'});
+  wrap.append(el('div', {className: 'row-title', textContent: 'Consumo'}), chips, stats, readout);
+  fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
+    if (current?.id !== it.id || current.range !== range) return;  // o cartão mudou enquanto buscava
+    if (!h.points.length) { stats.textContent = 'Sem dados ainda: o histórico começa a contar agora.'; return; }
+    stats.textContent = `${num(h.kwh, 2)} kWh · média ${num(h.avg_w, 0)} W`;
+    wrap.append(h.unit === 'kWh' ? dayBars(h, readout) : powerArea(h, readout), dataTable(h));
+    lockScroll(true);  // o cartão cresceu
+  }).catch(() => { stats.textContent = 'Não consegui carregar o histórico.'; });
+  return wrap;
+}
+
+// geometria comum: 340×150 no viewBox, escala uniforme com o cartão
+const G = {w: 340, h: 150, l: 50, r: 8, t: 10, b: 20};
+function frame(max, fmt) {
+  const svg = svgEl('svg', {viewBox: `0 0 ${G.w} ${G.h}`, class: 'chart', role: 'img'});
+  const y = v => G.t + (1 - v / max) * (G.h - G.t - G.b);
+  for (const v of [0, max / 2, max]) {
+    svg.append(svgEl('line', {x1: G.l, x2: G.w - G.r, y1: y(v), y2: y(v), class: 'grid'}));
+    const t = svgEl('text', {x: G.l - 6, y: y(v) + 4, 'text-anchor': 'end', class: 'tick'});
+    t.textContent = fmt(v);
+    svg.append(t);
+  }
+  return {svg, y};
+}
+function xLabel(svg, x, text, anchor = 'middle') {
+  const t = svgEl('text', {x, y: G.h - 4, 'text-anchor': anchor, class: 'tick'});
+  t.textContent = text;
+  svg.append(t);
+}
+// arrastar o dedo: acha o ponto mais próximo no X e chama show(i)
+function scrub(svg, xs, show) {
+  const pick = e => {
+    const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * G.w;
+    let i = 0;
+    xs.forEach((v, j) => { if (Math.abs(v - x) < Math.abs(xs[i] - x)) i = j; });
+    show(i);
+  };
+  svg.addEventListener('pointerdown', e => { svg.setPointerCapture(e.pointerId); pick(e); });
+  svg.addEventListener('pointermove', e => { if (e.buttons || e.pointerType === 'mouse') pick(e); });
+}
+
+function powerArea(h, readout) {
+  const [span, bucket] = h.range === '24h' ? [86400, 300] : [7 * 86400, 3600];
+  const end = Date.now() / 1000, start = end - span;
+  const max = niceMax(Math.max(...h.points.map(p => p[1])));
+  const {svg, y} = frame(max, v => `${num(v, 0)} W`);
+  const x = ts => G.l + (ts - start) / span * (G.w - G.l - G.r);
+  // quebra a linha onde faltam dados (servidor parado, tomada offline) em vez de ligar os pontos por cima do buraco
+  const segs = [];
+  h.points.forEach((p, i) => { if (!i || p[0] - h.points[i - 1][0] > 2 * bucket) segs.push([]); segs.at(-1).push(p); });
+  for (const seg of segs) {
+    const line = seg.map((p, i) => `${i ? 'L' : 'M'}${x(p[0]).toFixed(1)},${y(p[1]).toFixed(1)}`).join('');
+    const base = y(0).toFixed(1);
+    svg.append(svgEl('path', {d: `${line}L${x(seg.at(-1)[0]).toFixed(1)},${base}L${x(seg[0][0]).toFixed(1)},${base}Z`, class: 'area'}),
+               svgEl('path', {d: line, class: 'line'}));
+  }
+  const fmtX = ts => new Date(ts * 1000).toLocaleString('pt-BR', h.range === '24h'
+    ? {hour: '2-digit', minute: '2-digit'} : {weekday: 'short', hour: '2-digit'});
+  const tickFmt = ts => h.range === '24h' ? new Date(ts * 1000).getHours().toString().padStart(2, '0') + 'h'
+    : new Date(ts * 1000).toLocaleString('pt-BR', {weekday: 'short'});
+  xLabel(svg, x(start), tickFmt(start), 'start'); xLabel(svg, x(start + span / 2), tickFmt(start + span / 2)); xLabel(svg, x(end), 'agora', 'end');
+  const cross = svgEl('line', {y1: G.t, y2: G.h - G.b, class: 'cross', visibility: 'hidden'});
+  const dot = svgEl('circle', {r: 4, class: 'dot-mark', visibility: 'hidden'});
+  svg.append(cross, dot);
+  const xs = h.points.map(p => x(p[0]));
+  scrub(svg, xs, i => {
+    const [ts, w] = h.points[i];
+    for (const [k, v] of [['x1', xs[i]], ['x2', xs[i]]]) cross.setAttribute(k, v);
+    dot.setAttribute('cx', xs[i]); dot.setAttribute('cy', y(w));
+    cross.setAttribute('visibility', 'visible'); dot.setAttribute('visibility', 'visible');
+    readout.textContent = `${num(w, 0)} W · ${fmtX(ts)}`;
+  });
+  svg.setAttribute('aria-label', `Potência nas últimas ${RANGE_LABEL[h.range]}, máximo ${num(max, 0)} W`);
+  return svg;
+}
+
+function dayBars(h, readout) {
+  const days = 30, max = niceMax(Math.max(...h.points.map(p => p[1])));
+  const {svg, y} = frame(max, v => num(v, max < 1 ? 2 : 1) + (v === max ? ' kWh' : ''));  // unidade só no topo
+  const today = new Date(); today.setHours(12, 0, 0, 0);
+  const slot = (G.w - G.l - G.r) / days, bw = Math.min(24, slot - 2);  // 2px de respiro entre colunas
+  const byDay = Object.fromEntries(h.points);
+  const bars = [], xs = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today - (days - 1 - i) * 864e5), key = d.toLocaleDateString('sv');  // AAAA-MM-DD local
+    const cx = G.l + slot * (i + .5), v = byDay[key] ?? 0, top = y(v), base = y(0), r = Math.min(4, bw / 2, base - top);
+    xs.push(cx);
+    const bar = svgEl('path', {class: 'bar', d: v ? `M${cx - bw / 2},${base}V${top + r}Q${cx - bw / 2},${top} ${cx - bw / 2 + r},${top}` +
+      `H${cx + bw / 2 - r}Q${cx + bw / 2},${top} ${cx + bw / 2},${top + r}V${base}Z` : ''});
+    svg.append(bar);
+    bars.push([d, v, bar]);
+    if (i === days - 1) xLabel(svg, cx + bw / 2, 'hoje', 'end');
+    else if (i % 7 === 2) xLabel(svg, cx, d.toLocaleDateString('pt-BR', {day: '2-digit', month: '2-digit'}));
+  }
+  scrub(svg, xs, i => {
+    bars.forEach(([, , b], j) => b.classList.toggle('dim', j !== i));
+    const [d, v] = bars[i];
+    readout.textContent = `${num(v, 2)} kWh · ${d.toLocaleDateString('pt-BR', {weekday: 'short', day: '2-digit', month: '2-digit'})}`;
+  });
+  svg.setAttribute('aria-label', `Consumo por dia nos últimos 30 dias, máximo ${num(max, 2)} kWh`);
+  return svg;
+}
+
+// a mesma informação em tabela, para leitor de tela
+function dataTable(h) {
+  const t = el('table', {className: 'sr-only'});
+  t.append(el('caption', {textContent: `Consumo, ${RANGE_LABEL[h.range]}`}));
+  for (const [k, v] of h.points) {
+    const label = typeof k === 'number' ? new Date(k * 1000).toLocaleString('pt-BR') : k;
+    t.append(el('tr', {}, el('td', {textContent: label}), el('td', {textContent: h.unit === 'W' ? `${num(v, 0)} W` : `${num(v, 2)} kWh`})));
+  }
+  return t;
 }
 
 // ---- cenas: editor ----

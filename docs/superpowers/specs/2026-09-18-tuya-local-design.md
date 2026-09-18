@@ -113,9 +113,17 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   segurar um bloco abre um painel (`<dialog>`) com 15 min, 30 min, 1 h,
   2 h, um campo de minutos e "Cancelar timer". Esse painel é onde o brilho,
   a cor e os efeitos vão entrar.
-- **Histórico de consumo:** o poll já lê `cur_power` a cada 10 s. Gravar
-  num SQLite, no mesmo padrão do `/opt/scripts/telemetria.db`, é um passo
-  a mais no mesmo loop.
+- **Histórico de consumo (feito em 2026-09-18):** o poll grava uma média
+  por minuto por tomada em `history.db` (SQLite, fora do git). O kWh sai
+  integrando a potência, porque o `add_ele` zera sozinho.
+  `GET /api/history/<id>?range=24h|7d|30d` devolve 24 h em baldes de 5 min
+  (W), 7 d por hora (W) e 30 d em kWh por dia local. No cartão da tomada
+  aparecem o total, a média e um gráfico SVG feito à mão: área para W,
+  colunas para kWh, arrastar o dedo mostra o valor e há uma tabela para
+  leitor de tela. A série é âmbar `#b88600`, validado contra o cartão
+  escuro, porque o amarelo dos controles é claro demais para marca de
+  dado. Um buraco nos dados quebra a linha. Sem R$ e sem limpeza de
+  dados antigos por enquanto (~1 milhão de linhas por ano).
 
 ## Acesso
 
