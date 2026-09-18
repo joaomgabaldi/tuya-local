@@ -45,6 +45,108 @@ def check(d, dp, value):
     return None
 
 
+DEVS = {}   # id → aparelho do devices.json, na ordem de exibição
+CONN = {}   # id → tinytuya.Device; aparelho sem IP fica de fora até a descoberta achar
+CACHE = {}  # id → {"online": bool, "dps": dict}
+# ponytail: lock global, uma chamada por vez em toda a casa; trocar por lock por aparelho se o toque ficar lento
+LOCK = threading.Lock()
+
+
+def connect(d, ip, version):
+    import tinytuya
+    dev = tinytuya.Device(d["id"], ip, d["key"], version=float(version))
+    dev.set_socketTimeout(3)
+    dev.set_socketRetryLimit(1)
+    return dev
+
+
+def refresh(id, fn):
+    """Roda fn(device) sob o lock e junta os DPs da resposta ao cache. Devolve a mensagem de erro ou None."""
+    with LOCK:
+        r = fn(CONN[id])
+    entry = CACHE[id]
+    if isinstance(r, dict) and "dps" in r:
+        entry["dps"] = {**entry["dps"], **r["dps"]}  # troca o dict inteiro: quem está serializando não vê ele mudar
+        entry["online"] = True
+        return None
+    entry["online"] = False
+    return r.get("Error", "erro desconhecido") if isinstance(r, dict) else "sem resposta"
+
+
+def poll():
+    while True:
+        for id in list(CONN):
+            refresh(id, lambda dev: dev.status())
+        time.sleep(POLL_EVERY)
+
+
+def discover():
+    """Aparelho sem IP no devices.json (ex.: offline no wizard): procura pelo broadcast até achar."""
+    import tinytuya
+    while missing := [i for i in DEVS if i not in CONN]:
+        for i in missing:
+            b = tinytuya.find_device(i)  # ~18 s escutando broadcast, sem lock: não abre conexão
+            if b["ip"]:
+                CONN[i] = connect(DEVS[i], b["ip"], b["version"])
+                print(f"{DEVS[i]['name']} achado em {b['ip']}", flush=True)
+        time.sleep(60)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def reply(self, code, body, ctype="application/json"):
+        if not isinstance(body, bytes):
+            body = json.dumps(body, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        files = {"/": ("index.html", "text/html; charset=utf-8"),
+                 "/manifest.json": ("manifest.json", "application/manifest+json")}
+        path = self.path.split("?")[0]
+        if path in files:
+            name, ctype = files[path]
+            return self.reply(200, (DIR / name).read_bytes(), ctype)
+        if path == "/api/state":
+            return self.reply(200, [view(DEVS[i], CACHE[i]) for i in DEVS])
+        self.reply(404, {"error": "não encontrado"})
+
+    def do_POST(self):
+        id = self.path.removeprefix("/api/set/")
+        if id == self.path or id not in DEVS:
+            return self.reply(404, {"error": "aparelho não encontrado"})
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+            dp, value = str(body["dp"]), body["value"]
+        except (ValueError, KeyError, TypeError):
+            return self.reply(400, {"error": 'corpo esperado: {"dp": ..., "value": ...}'})
+        if err := check(DEVS[id], dp, value):
+            return self.reply(400, {"error": err})
+        if id not in CONN:
+            return self.reply(502, {"error": "aparelho ainda não achado na rede"})
+        if err := refresh(id, lambda dev: dev.set_value(dp, value)):
+            return self.reply(502, {"error": err})
+        self.reply(200, view(DEVS[id], CACHE[id]))
+
+    def log_message(self, *args):
+        pass  # a página consulta a cada 5 s; logar isso só enche o journal
+
+
+def main():
+    for d in load(json.load(open(DIR / "devices.json"))):
+        DEVS[d["id"]] = d
+        CACHE[d["id"]] = {"online": False, "dps": {}}
+        if d.get("ip"):
+            CONN[d["id"]] = connect(d, d["ip"], d["version"])
+    threading.Thread(target=poll, daemon=True).start()
+    threading.Thread(target=discover, daemon=True).start()
+    print(f"ouvindo em http://{HOST}:{PORT}", flush=True)
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
+
+
 def selftest():
     pc = {"id": "a", "name": "PC", "category": "cz", "mapping": {
         "1": {"code": "switch_1", "type": "Boolean", "values": {}},
@@ -73,3 +175,5 @@ def selftest():
 if __name__ == "__main__":
     if "--selftest" in sys.argv:
         selftest()
+    else:
+        main()

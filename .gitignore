@@ -4,3 +4,4 @@ tinytuya.json
 tuya-raw.json
 snapshot.json
 .venv/
+__pycache__/
