@@ -418,14 +418,14 @@ function openCard(state) {
   lockScroll(true);
   const key = state.key;
   const from = tileOf(key).getBoundingClientRect();
-  const grow = $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
-                                 {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
+  $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
+                    {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
   for (const part of contentParts())
     part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
   document.documentElement.classList.add('blurred');
+  // o bloco "vira" o cartão: fica escondido até o cartão voltar para ele ao fechar (como no iOS). Se reaparecesse
+  // desfocado atrás, um cartão pequeno (tomada) deixava o bloco à mostra ao lado dele
   hideTile(key);
-  // o bloco some só enquanto "vira" o cartão; parado, ele volta desfocado atrás
-  grow.onfinish = () => { if (current === state) showTile(); };
 }
 const openDevice = id => openCard({kind: 'device', key: id, id});
 
