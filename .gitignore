@@ -1,0 +1,6 @@
+# segredos: local keys e credenciais da Tuya em texto puro
+devices.json
+tinytuya.json
+tuya-raw.json
+snapshot.json
+.venv/
