@@ -231,7 +231,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/manifest.json": ("manifest.json", "application/manifest+json"),
-                 "/codec.js": ("codec.js", "text/javascript; charset=utf-8")}
+                 "/codec.js": ("codec.js", "text/javascript; charset=utf-8"),
+                 "/icon-180.png": ("icon-180.png", "image/png"),
+                 "/icon-512.png": ("icon-512.png", "image/png"),
+                 "/proto": ("proto.html", "text/html; charset=utf-8")}  # candidata do visual novo, sai ao ser promovida
         path = self.path.split("?")[0]
         if path in files:
             name, ctype = files[path]
