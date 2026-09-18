@@ -394,12 +394,16 @@ function longPress(t, onTap, onHold) {
 // ---- cartão expandido (FLIP: nasce do retângulo do bloco) ----
 // keyframe que põe o cartão exatamente sobre `rect` (o bloco). O raio é dividido pela escala
 // de cada eixo para o canto continuar redondo em vez de virar elipse esticada.
-function flipFrom(rect, radius = 16) {
-  const to = $('card').getBoundingClientRect();
+// A cor e a sombra também vêm do bloco: senão o cartão encolhe na cor dele (branco no claro) e troca de uma vez
+// para a do bloco (cinza se desligado) no último quadro.
+function flipFrom(tile, radius = 16) {
+  const rect = tile.getBoundingClientRect(), to = $('card').getBoundingClientRect(), ts = getComputedStyle(tile);
   const sx = rect.width / to.width, sy = rect.height / to.height;
   return {transform: `translate(${rect.left - to.left}px, ${rect.top - to.top}px) scale(${sx}, ${sy})`,
-          borderRadius: `${radius / sx}px / ${radius / sy}px`};
+          borderRadius: `${radius / sx}px / ${radius / sy}px`, backgroundColor: ts.backgroundColor, boxShadow: ts.boxShadow};
 }
+// cor e sombra do cartão aberto, para a outra ponta da animação
+const cardLook = () => { const cs = getComputedStyle($('card')); return {backgroundColor: cs.backgroundColor, boxShadow: cs.boxShadow}; };
 const contentParts = () => [$('c-body'), $('c-erro'), $('card').querySelector('.grab')];
 
 // com o cartão aberto o fundo não rola. Cartão sem rolagem própria só aceita gesto horizontal (a fileira
@@ -417,8 +421,7 @@ function openCard(state) {
   $('overlay').hidden = $('card').hidden = false;
   lockScroll(true);
   const key = state.key;
-  const from = tileOf(key).getBoundingClientRect();
-  $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
+  $('card').animate([flipFrom(tileOf(key)), {transform: 'none', borderRadius: '28px', ...cardLook()}],
                     {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
   for (const part of contentParts())
     part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
@@ -437,13 +440,12 @@ function closeCard(fromY = 0) {
   render();  // o bloco já reflete o que mudou no cartão
   if (!tileOf(key)) key = 'scene:new';  // cena excluída: volta para o "＋ Nova"
   hideTile(key);
-  const to = tileOf(key).getBoundingClientRect();
   const card = $('card');
   card.style.transform = '';
   const start = fromY ? `translateY(${fromY}px)` : 'none';
   // o conteúdo some ANTES de o cartão começar a encolher, então nunca aparece esmagado
   for (const part of contentParts()) part.animate([{opacity: 1}, {opacity: 0}], {duration: 90, fill: 'forwards'});
-  const a = card.animate([{transform: start, borderRadius: '28px'}, flipFrom(to)],
+  const a = card.animate([{transform: start, borderRadius: '28px', ...cardLook()}, flipFrom(tileOf(key))],
                          {duration: 340, delay: 60, easing: 'cubic-bezier(.3, 0, .2, 1)', fill: 'forwards'});
   document.documentElement.classList.remove('blurred');
   a.onfinish = () => {  // fill: forwards segura o último quadro; sem ele o cartão grande piscava antes de sumir
