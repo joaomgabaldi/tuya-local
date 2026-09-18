@@ -6,178 +6,397 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Casa">
-<meta name="theme-color" content="#111111">
+<meta name="theme-color" content="#000000">
 <link rel="manifest" href="/manifest.json">
 <title>Casa</title>
 <style>
-  :root { color-scheme: dark; --bg: #111; --off: #242424; --on: #f5c542; --txt: #eee; --sheet: #1c1c1c; }
-  body { margin: 0; padding: 16px; padding-top: max(16px, env(safe-area-inset-top));
-         background: var(--bg); color: var(--txt); font: 16px -apple-system, system-ui, sans-serif; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 20px 0 8px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-  .grid button { all: unset; box-sizing: border-box; min-height: 84px; padding: 12px; border-radius: 14px;
-           background: var(--off); display: flex; flex-direction: column; justify-content: space-between;
-           cursor: pointer; -webkit-tap-highlight-color: transparent;
-           -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-  .grid button:focus-visible { outline: 2px solid var(--on); }
-  .grid button.on { background: var(--on); color: #111; }
-  .grid button.offline { opacity: .35; pointer-events: none; }
-  .grid button.busy { opacity: .6; }
-  small { opacity: .75; font-size: 13px; }
-  #erro { color: #f77; min-height: 1.2em; }
+  :root { color-scheme: dark; --tile: rgb(44 44 46 / .85); --tile-on: #f2f2f7; --txt: #f2f2f7;
+          --sub: rgb(235 235 245 / .6); --card: rgb(28 28 30 / .92); --chip: rgb(118 118 128 / .24);
+          --accent: #ffd60a; --ease: cubic-bezier(.2, .9, .25, 1.05); }
+  * { -webkit-tap-highlight-color: transparent; }
+  /* o dedo continua pressionado quando o cartão abre: sem isso o iOS seleciona tudo que está embaixo */
+  html { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  body { margin: 0; padding: 12px 16px 32px; padding-top: max(12px, env(safe-area-inset-top));
+         background: radial-gradient(120% 60% at 50% 0%, #1f2a44 0%, #000 70%) fixed; color: var(--txt);
+         font: 17px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
+  h1 { font-size: 34px; font-weight: 700; margin: 8px 0 4px; letter-spacing: -.02em; }
+  h2 { font-size: 20px; font-weight: 600; margin: 22px 0 10px; }
+  .erro { color: #ff6961; font-size: 15px; min-height: 1.2em; margin: 4px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
-  /* painel de ajustes: abre ao tocar e segurar um bloco */
-  dialog { margin: auto 0 0; width: 100%; max-width: none; box-sizing: border-box; border: 0;
-           border-radius: 18px 18px 0 0; background: var(--sheet); color: var(--txt);
-           padding: 16px 16px max(20px, env(safe-area-inset-bottom)); }
-  dialog::backdrop { background: rgb(0 0 0 / .5); }
-  dialog header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-  dialog p { margin: 12px 0 8px; opacity: .8; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  dialog button, dialog input { font: inherit; color: inherit; background: var(--off); border: 0;
-           border-radius: 10px; padding: 10px 14px; }
-  dialog input { width: 7.5em; }
-  dialog button.close { background: none; font-size: 20px; padding: 4px 8px; }
-  dialog button.danger { color: #f77; }
+  .tile { position: relative; box-sizing: border-box; height: 72px; padding: 10px 12px; border-radius: 16px;
+          background: var(--tile); display: flex; align-items: center; gap: 10px; cursor: pointer;
+          touch-action: manipulation; transition: transform .18s var(--ease), background .2s; }
+  .tile.pressing { transform: scale(.94); }
+  .tile.on { background: var(--tile-on); color: #000; }
+  .tile.on .sub { color: rgb(60 60 67 / .6); }
+  .tile.offline { opacity: .45; }
+  .tile.busy { opacity: .7; }
+  .icon { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+          font-size: 17px; background: rgb(255 255 255 / .12); }
+  .tile.on .icon { background: var(--dot, var(--accent)); color: #000; }
+  .tile .txt { min-width: 0; line-height: 1.2; }
+  .tile .name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tile .sub { font-size: 13px; color: var(--sub); }
+
+  /* o desfoque é no próprio conteúdo, não numa camada fixa por cima: o Safari desenha a página embaixo da
+     Dynamic Island e da barra de URL, e uma camada fixa escura virava faixas pretas nessas áreas.
+     O #overlay fica transparente e só serve para capturar o toque fora do cartão. */
+  html.locked, html.locked body { overflow: hidden; }
+  #overlay { position: fixed; inset: 0; touch-action: none; }
+  h1, main, body > .erro { transition: filter .3s; }
+  html.blurred h1, html.blurred main, html.blurred body > .erro { filter: blur(18px) brightness(.55) saturate(1.3); }
+  #card { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 32px));
+          height: fit-content; max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain;
+          border-radius: 28px; background: var(--card); transform-origin: 0 0; padding: 0 20px 22px; }
+  [hidden] { display: none !important; }
+  .grab { padding: 10px 0 6px; touch-action: none; cursor: grab; }
+  .grab::before { content: ""; display: block; width: 36px; height: 5px; border-radius: 3px;
+                  background: rgb(255 255 255 / .3); margin: 0 auto 12px; }
+  .grab .name { font-size: 22px; font-weight: 700; }
+  .grab .sub { font-size: 15px; color: var(--sub); margin-top: 2px; min-height: 1.2em; }
+
+  .pill { position: relative; width: 120px; height: 300px; max-height: 42dvh; margin: 18px auto 8px;
+          border-radius: 36px; background: rgb(120 120 128 / .32); overflow: hidden; touch-action: none; cursor: ns-resize; }
+  .pill .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--fill, #fff); transition: background .25s; }
+  .pill .ico { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 26px;
+               mix-blend-mode: difference; pointer-events: none; }
+  .power { display: grid; place-items: center; width: 132px; height: 132px; margin: 22px auto 6px;
+           border: 0; border-radius: 50%; font: 56px/1 -apple-system, system-ui, sans-serif; cursor: pointer;
+           color: var(--sub); background: rgb(120 120 128 / .32); transition: background .2s, color .2s, transform .15s var(--ease); }
+  .power.on { background: var(--accent); color: #000; }
+  .power:active { transform: scale(.94); }
+
+  .row-title { font-size: 13px; color: var(--sub); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
+  .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+  .sw { width: 38px; height: 38px; border-radius: 50%; border: 0; padding: 0; background: var(--c);
+        box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s, transform .15s; cursor: pointer; }
+  .sw.sel { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px #fff; }
+  .sw:active { transform: scale(.9); }
+  .sw.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); position: relative; overflow: hidden; }
+  .sw.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; font: inherit; font-size: 15px; color: var(--txt); background: var(--chip); border: 0;
+          border-radius: 999px; padding: 8px 14px; cursor: pointer; }
+  .chip.sel { background: var(--txt); color: #000; }
+  .chip:active { transform: scale(.95); }
 </style>
 </head>
 <body>
-<div id="erro" role="status"></div>
+<h1>Casa</h1>
+<div class="erro" id="erro" role="status"></div>
 <main id="app"></main>
-<dialog id="sheet">
-  <header><strong id="sheet-name"></strong><button class="close" aria-label="Fechar">✕</button></header>
-  <div id="sheet-body"></div>
-</dialog>
-<script>
-const app = document.getElementById('app'), erro = document.getElementById('erro');
-const sheet = document.getElementById('sheet'), sheetName = document.getElementById('sheet-name'),
-      sheetBody = document.getElementById('sheet-body');
-const busy = new Set();
-let last = [], pressing = false, sheetId = null;
+<div id="overlay" hidden></div>
+<div id="card" hidden role="dialog" aria-modal="true">
+  <div class="grab"><div class="name" id="c-name"></div><div class="sub" id="c-sub"></div></div>
+  <div class="erro" id="c-erro" role="status"></div>
+  <div id="c-body"></div>
+</div>
+<script type="module">
+import {readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, EFFECTS} from '/codec.js';
 
-const el = (tag, props = {}, ...kids) => {
-  const e = Object.assign(document.createElement(tag), props);
-  e.append(...kids);
-  return e;
-};
-const timerLeft = it => it.timer_dp ? (it.dps[it.timer_dp] || 0) : 0;
+const COLORS = [[0, 900], [28, 950], [50, 950], [120, 700], [185, 800], [215, 900], [270, 750], [320, 800]];  // h, s
+const WHITES = [[0, '#ffc98a'], [30, '#ffe0b8'], [60, '#fff4e6'], [100, '#e6efff']];  // temperatura %, cor na tela
+const TIMERS = [15, 30, 60, 120];
 
+const $ = id => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const isLight = it => it.group === 'Lâmpadas' || it.group === 'Fitas LED';
+const byId = id => last.find(x => x.id === id);
+let last = [], pressing = false;
+let current = null;     // id do aparelho com o cartão aberto
+let hiddenTile = null;  // id do bloco escondido enquanto "vira" o cartão (abrir e fechar)
+
+function colorOf(it) {
+  if (!isLight(it)) return 'var(--accent)';
+  const l = readLight(it);
+  if (l.mode === 'scene') return 'linear-gradient(180deg, #ff5f6d, #ffc371, #47e891, #3fa7ff)';
+  if (l.mode === 'white') return WHITES.reduce((a, w) => Math.abs(w[0] - l.temp) < Math.abs(a[0] - l.temp) ? w : a)[1];
+  return `hsl(${l.h} ${l.s / 10}% 58%)`;
+}
+// ligado/desligado já aparece no bloco aceso e no ícone; o texto fica só para o que é especial
+function status(it) {
+  if (!it.online) return 'Sem resposta';
+  const parts = [];
+  if (it.on && it.watts != null) parts.push(`${it.watts.toFixed(1).replace('.', ',')} W`);
+  if (it.on && isLight(it)) {
+    const l = readLight(it);
+    parts.push(l.mode === 'scene' ? EFFECTS[l.scene]?.name ?? 'Efeito' : `${l.bright}%`);
+  }
+  const left = it.timer_dp ? it.dps[it.timer_dp] || 0 : 0;
+  if (left) parts.push(`⏱ ${Math.ceil(left / 60)} min`);
+  return parts.join(' · ');
+}
+const iconOf = it => ({'Fitas LED': '〰️', 'Tomadas': '🔌'})[it.group] ?? '💡';
+function showError(msg) { $('erro').textContent = $('c-erro').textContent = msg; }
+
+// ---- servidor ----
+async function load() {
+  try {
+    const r = await fetch('/api/state');
+    last = await r.json();
+    if (!outbox.size) showError('');
+    render();
+    if (current) $('c-sub').textContent = status(byId(current));
+  } catch (e) {
+    showError('Sem conexão com o servidor');
+  }
+}
+
+// fila por aparelho: no máximo uma escrita em andamento; o que chega nesse meio tempo é juntado e vai
+// na próxima, 250 ms depois. Arrastar a pílula manda dezenas de eventos por segundo e a lâmpada não aguenta.
+const outbox = new Map();  // id → {dps, done: [callbacks]}
+function send(it, dps, done) {
+  const box = outbox.get(it.id);
+  if (box) { Object.assign(box.dps, dps); if (done) box.done.push(done); return; }
+  outbox.set(it.id, {dps: {...dps}, done: done ? [done] : []});
+  render();
+  flush(it.id);
+}
+async function flush(id) {
+  const box = outbox.get(id);
+  while (Object.keys(box.dps).length) {
+    const dps = box.dps;
+    box.dps = {};
+    try {
+      const r = await fetch('/api/set/' + id, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                               body: JSON.stringify({dps})});
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error);
+      last = last.map(x => x.id === id ? body : x);
+      showError('');
+    } catch (e) {
+      showError(`${byId(id).name}: ${e.message}`);
+    }
+    if (Object.keys(box.dps).length) await new Promise(ok => setTimeout(ok, 250));
+  }
+  outbox.delete(id);
+  render();
+  box.done.forEach(f => f());
+}
+
+// ---- grade ----
 function render() {
   if (pressing) return;  // re-render no meio do toque e segure perderia o gesto
-  app.replaceChildren();
+  $('app').replaceChildren();
   let grid;
   for (const it of last) {
     if (!grid || grid.dataset.group !== it.group) {
       grid = el('div', {className: 'grid'});
       grid.dataset.group = it.group;
-      app.append(el('h2', {textContent: it.group}), grid);
+      $('app').append(el('h2', {textContent: it.group}), grid);
     }
-    const left = timerLeft(it);
-    const status = !it.online ? ['offline'] : [
-      it.watts != null ? `${it.watts.toFixed(1)} W` : it.on ? 'ligado' : 'desligado',
-      left && `⏱ ${Math.ceil(left / 60)} min`,
-    ].filter(Boolean);
-    const b = el('button', {}, el('span', {textContent: it.name}), el('small', {textContent: status.join(' · ')}));
-    b.className = [it.on && 'on', !it.online && 'offline', busy.has(it.id) && 'busy'].filter(Boolean).join(' ');
-    b.setAttribute('aria-pressed', String(!!it.on));
-    longPress(b, () => toggle(it), () => openSheet(it.id));
-    grid.append(b);
+    const t = el('div', {role: 'button', tabIndex: 0},
+      el('div', {className: 'icon', textContent: iconOf(it)}),
+      el('div', {className: 'txt'}, el('div', {className: 'name', textContent: it.name}),
+                                    el('div', {className: 'sub', textContent: status(it)})));
+    t.className = ['tile', it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy'].filter(Boolean).join(' ');
+    t.setAttribute('aria-pressed', String(!!it.on));
+    const dot = colorOf(it);
+    t.style.setProperty('--dot', dot.startsWith('linear') ? '#ffc371' : dot);
+    t.dataset.id = it.id;
+    if (it.id === hiddenTile) t.style.visibility = 'hidden';  // poll no meio da animação não pode revelar o bloco
+    if (it.online) longPress(t, () => send(it, {[it.dp]: !it.on}), () => openCard(it.id));
+    grid.append(t);
   }
 }
+const tileOf = id => document.querySelector(`.tile[data-id="${id}"]`);
+function hideTile(id) { hiddenTile = id; tileOf(id).style.visibility = 'hidden'; }
+function showTile() { const t = hiddenTile && tileOf(hiddenTile); hiddenTile = null; if (t) t.style.visibility = ''; }
 
-// toque curto = onTap; segurar 500 ms = onHold (e o click que vem depois é ignorado)
-function longPress(b, onTap, onHold) {
-  let t, held = false;
-  const cancel = () => { clearTimeout(t); pressing = false; };
-  b.addEventListener('pointerdown', () => {
-    held = false; pressing = true;
-    t = setTimeout(() => { held = true; pressing = false; onHold(); }, 500);
+// toque curto = alterna; segurar 500 ms = expande. Mexer o dedo > 10 px (rolagem) cancela.
+function longPress(t, onTap, onHold) {
+  let timer, held, x0, y0;
+  const cancel = () => { clearTimeout(timer); t.classList.remove('pressing'); pressing = false; };
+  t.addEventListener('pointerdown', e => {
+    held = false; x0 = e.clientX; y0 = e.clientY; pressing = true;
+    t.classList.add('pressing');
+    timer = setTimeout(() => { held = true; cancel(); onHold(); }, 500);
   });
-  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, cancel));
-  b.addEventListener('contextmenu', e => e.preventDefault());
-  b.addEventListener('click', () => { if (!held) onTap(); });
+  t.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - x0, e.clientY - y0) > 10) cancel(); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => t.addEventListener(ev, cancel));
+  t.addEventListener('contextmenu', e => e.preventDefault());
+  t.addEventListener('click', () => { if (!held) onTap(); });
 }
 
-function openSheet(id) {
-  sheetId = id;
-  renderSheet();
-  if (!sheet.open) sheet.showModal();
+// ---- cartão expandido (FLIP: nasce do retângulo do bloco) ----
+// keyframe que põe o cartão exatamente sobre `rect` (o bloco). O raio é dividido pela escala
+// de cada eixo para o canto continuar redondo em vez de virar elipse esticada.
+function flipFrom(rect, radius = 16) {
+  const to = $('card').getBoundingClientRect();
+  const sx = rect.width / to.width, sy = rect.height / to.height;
+  return {transform: `translate(${rect.left - to.left}px, ${rect.top - to.top}px) scale(${sx}, ${sy})`,
+          borderRadius: `${radius / sx}px / ${radius / sy}px`};
+}
+const contentParts = () => [$('c-body'), $('c-erro'), $('card').querySelector('.grab')];
+
+// com o cartão aberto o fundo não rola. Cartão sem rolagem própria só aceita gesto horizontal (a fileira
+// de efeitos); o vertical "vazava" para a página desfocada atrás.
+function lockScroll(on) {
+  document.documentElement.classList.toggle('locked', on);
+  const card = $('card');
+  card.style.touchAction = on && card.scrollHeight <= card.clientHeight ? 'pan-x' : '';
 }
 
-function renderSheet() {
-  const it = last.find(x => x.id === sheetId);
-  if (!it) return;
-  sheetName.textContent = it.name;
-  sheetBody.replaceChildren();
-  if (!it.timer_dp) {
-    sheetBody.append(el('p', {textContent: 'Este aparelho não tem timer.'}));
-    return;
+function openCard(id) {
+  current = id;
+  $('c-erro').textContent = '';
+  renderCard();
+  $('overlay').hidden = $('card').hidden = false;
+  lockScroll(true);
+  const from = tileOf(id).getBoundingClientRect();
+  const grow = $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
+                                 {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
+  for (const part of contentParts())
+    part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
+  document.documentElement.classList.add('blurred');
+  hideTile(id);
+  // o bloco some só enquanto "vira" o cartão; parado, ele volta desfocado atrás
+  grow.onfinish = () => { if (current === id) showTile(); };
+}
+
+function closeCard(fromY = 0) {
+  const id = current;
+  if (!id) return;
+  current = null;
+  hiddenTile = id;
+  render();  // o bloco já reflete o que mudou no cartão (e nasce escondido)
+  const to = tileOf(id).getBoundingClientRect();
+  const card = $('card');
+  card.style.transform = '';
+  const start = fromY ? `translateY(${fromY}px)` : 'none';
+  // o conteúdo some ANTES de o cartão começar a encolher, então nunca aparece esmagado
+  for (const part of contentParts()) part.animate([{opacity: 1}, {opacity: 0}], {duration: 90, fill: 'forwards'});
+  const a = card.animate([{transform: start, borderRadius: '28px'}, flipFrom(to)],
+                         {duration: 340, delay: 60, easing: 'cubic-bezier(.3, 0, .2, 1)', fill: 'forwards'});
+  document.documentElement.classList.remove('blurred');
+  a.onfinish = () => {  // fill: forwards segura o último quadro; sem ele o cartão grande piscava antes de sumir
+    lockScroll(false);
+    showTile();
+    card.hidden = $('overlay').hidden = true;
+    [card, ...contentParts()].flatMap(x => x.getAnimations()).forEach(x => x.cancel());
+  };
+}
+$('overlay').addEventListener('click', () => closeCard());
+
+// arrastar para baixo pelo topo do cartão fecha
+(() => {
+  const grab = $('card').querySelector('.grab');
+  let y0 = null, dy = 0;
+  grab.addEventListener('pointerdown', e => { y0 = e.clientY; dy = 0; grab.setPointerCapture(e.pointerId); });
+  grab.addEventListener('pointermove', e => {
+    if (y0 === null) return;
+    dy = Math.max(0, e.clientY - y0);
+    $('card').style.transform = `translateY(${dy}px)`;
+  });
+  grab.addEventListener('pointerup', () => {
+    if (y0 === null) return;
+    y0 = null;
+    if (dy > 90) return closeCard(dy);
+    $('card').animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 250, easing: 'cubic-bezier(.2, .9, .25, 1.1)'});
+    $('card').style.transform = '';
+  });
+})();
+
+// manda o comando e redesenha o cartão com a resposta do aparelho
+const act = (it, dps) => send(it, dps, () => { if (current === it.id) renderCard(); });
+
+function renderCard() {
+  const it = byId(current);
+  $('c-name').textContent = it.name;
+  $('c-sub').textContent = status(it);
+  const body = $('c-body');
+  body.replaceChildren();
+
+  if (isLight(it)) {
+    const l = readLight(it);
+    body.append(brightPill(it));
+    body.append(el('div', {className: 'row-title', textContent: 'Cores'}), swatchRow(
+      COLORS.map(([h, s]) => ({c: `hsl(${h} ${s / 10}% 58%)`, sel: l.mode === 'colour' && l.h === h && l.s === s,
+                               pick: () => act(it, colourCmd(it, h, s))})), it));
+    if (it.codes.temp_value_v2) {
+      body.append(el('div', {className: 'row-title', textContent: 'Branco'}), swatchRow(
+        WHITES.map(([temp, c]) => ({c, sel: l.mode === 'white' && Math.abs(l.temp - temp) <= 5,
+                                    pick: () => act(it, whiteCmd(it, temp))}))));
+    }
+    body.append(el('div', {className: 'row-title', textContent: 'Efeitos'}), chipRow(effectsFor(it).map(([i, e]) => ({
+      label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => act(it, effectCmd(it, i))}))));
+  } else {
+    const b = el('button', {className: 'power' + (it.on ? ' on' : ''), textContent: '⏻', ariaLabel: 'Liga/desliga'});
+    b.setAttribute('aria-pressed', String(!!it.on));
+    b.onclick = () => act(it, {[it.dp]: !it.on});
+    body.append(b);
   }
-  const left = timerLeft(it);
-  const action = it.on ? 'Desligar' : 'Ligar';
-  sheetBody.append(el('p', {textContent: left
-    ? `${action} em ${Math.ceil(left / 60)} min. Trocar para:` : `${action} em:`}));
-  const chips = el('div', {className: 'chips'});
-  for (const [label, min] of [['15 min', 15], ['30 min', 30], ['1 h', 60], ['2 h', 120]]) {
-    chips.append(el('button', {textContent: label, onclick: () => setTimer(it, min * 60)}));
-  }
-  const input = el('input', {type: 'number', inputMode: 'numeric', min: 1, max: 1440, placeholder: '1–1440 min'});
-  chips.append(input, el('button', {textContent: 'OK', onclick: () => {
-    const min = parseInt(input.value, 10);
-    if (min >= 1 && min <= 1440) setTimer(it, min * 60);
-    else { input.value = ''; input.focus(); }  // o #erro fica atrás do painel; o placeholder já diz a faixa
-  }}));
-  sheetBody.append(chips);
-  if (left) {
-    sheetBody.append(el('p', {}, el('button', {className: 'danger', textContent: 'Cancelar timer',
-      onclick: () => setTimer(it, 0)})));
+  if (it.timer_dp) {
+    const left = Math.ceil((it.dps[it.timer_dp] || 0) / 60);
+    const label = left ? `${it.on ? 'Desliga' : 'Liga'} em ${left} min` : (it.on ? 'Desligar em' : 'Ligar em');
+    const opts = TIMERS.map(m => ({label: m < 60 ? `${m} min` : `${m / 60} h`, pick: () => act(it, {[it.timer_dp]: m * 60})}));
+    if (left) opts.push({label: 'Cancelar', pick: () => act(it, {[it.timer_dp]: 0})});
+    body.append(el('div', {className: 'row-title', textContent: '⏱ ' + label}), chipRow(opts));
   }
 }
 
-async function setTimer(it, seconds) {
-  await send(it, it.timer_dp, seconds);
-  sheet.close();
+function brightPill(it) {
+  const fill = el('div', {className: 'fill'});
+  const p = el('div', {className: 'pill'}, fill, el('div', {className: 'ico', textContent: '☀︎'}));
+  const l = readLight(it);
+  let pct = it.on ? l.bright : 0;
+  const paint = () => { fill.style.height = pct + '%'; p.style.setProperty('--fill', colorOf(byId(it.id))); };
+  paint();
+  let y0 = null, v0, moved;
+  p.addEventListener('pointerdown', e => { y0 = e.clientY; v0 = pct; moved = false; p.setPointerCapture(e.pointerId); });
+  p.addEventListener('pointermove', e => {
+    if (y0 === null || l.mode === 'scene') return;  // efeito não tem brilho próprio: só liga/desliga
+    const dv = (y0 - e.clientY) / p.clientHeight * 100;
+    if (Math.abs(dv) > 1) moved = true;
+    if (!moved) return;
+    pct = Math.round(clamp(v0 + dv, 0, 100));
+    paint();
+    $('c-sub').textContent = pct ? `${pct}%` : '';
+    send(byId(it.id), brightCmd(byId(it.id), pct));
+  });
+  p.addEventListener('pointerup', () => {
+    if (y0 !== null && !moved) act(it, {[it.dp]: !it.on});  // toque sem arrastar = liga/desliga
+    else if (y0 !== null) send(it, {}, () => { if (current === it.id) renderCard(); });  // redesenha ao terminar a fila
+    y0 = null;
+  });
+  return p;
 }
 
-async function load() {
-  try {
-    const r = await fetch('/api/state');
-    last = await r.json();
-    erro.textContent = '';
-    render();
-  } catch (e) {
-    erro.textContent = 'Sem conexão com o servidor';
+function swatchRow(items, it) {
+  const row = el('div', {className: 'swatches'});
+  for (const s of items) {
+    const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: s.pick});
+    b.style.setProperty('--c', s.c);
+    row.append(b);
   }
-}
-
-async function send(it, dp, value) {
-  if (busy.has(it.id)) return;
-  busy.add(it.id);
-  render();
-  try {
-    const r = await fetch('/api/set/' + it.id, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({dp, value}),
+  if (it) {  // cor livre
+    const input = el('input', {type: 'color', value: '#ff8800'});
+    const label = el('label', {className: 'sw custom', title: 'Outra cor'}, input);
+    // aplica só quando o seletor fecha ('change'): a janela do iOS já mostra a cor escolhida enquanto arrasta.
+    // e sem renderCard() aqui: recriar o input preso ao seletor nativo derrubava o Safari (SIGABRT).
+    input.addEventListener('change', () => {
+      const [r, g, b] = [1, 3, 5].map(i => parseInt(input.value.slice(i, i + 2), 16) / 255);
+      const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
+      const h = c === 0 ? 0 : max === r ? 60 * (((g - b) / c) % 6) : max === g ? 60 * ((b - r) / c + 2) : 60 * ((r - g) / c + 4);
+      $('card').querySelectorAll('.sw.sel').forEach(x => x.classList.remove('sel'));
+      label.classList.add('sel');
+      send(byId(it.id), colourCmd(byId(it.id), Math.round((h + 360) % 360), Math.round(max ? c / max * 1000 : 0)));
     });
-    const body = await r.json();
-    if (!r.ok) throw new Error(body.error);
-    last = last.map(x => x.id === body.id ? body : x);
-    erro.textContent = '';
-  } catch (e) {
-    erro.textContent = `${it.name}: ${e.message}`;
+    row.append(label);
   }
-  busy.delete(it.id);
-  render();
+  return row;
 }
 
-const toggle = it => send(it, it.dp, !it.on);
+function chipRow(items) {
+  const row = el('div', {className: 'chips'});
+  for (const c of items) row.append(el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label, onclick: c.pick}));
+  return row;
+}
 
-sheet.querySelector('.close').onclick = () => sheet.close();
-sheet.addEventListener('click', e => {  // toque no fundo escuro, fora do painel
-  const r = sheet.getBoundingClientRect();
-  if (e.target === sheet && (e.clientY < r.top || e.clientX < r.left || e.clientX > r.right)) sheet.close();
-});
+document.addEventListener('selectstart', e => e.preventDefault());  // reforço do user-select: none no iOS
 
 let timer;
 function start() {

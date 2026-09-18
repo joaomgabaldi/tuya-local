@@ -46,7 +46,8 @@ João).
 Três arquivos em `~/homelab/tuya-local/`:
 
 - `app.py`: `http.server` da stdlib (`ThreadingHTTPServer`) + tinytuya.
-- `index.html`: página única com HTML, CSS e JS inline.
+- `index.html`: página única com HTML e CSS inline; o JS de tela também é inline.
+- `codec.js`: módulo com a tradução entre os DPs e a tela (testado com `node codec.test.mjs`).
 - `manifest.json`: nome, `display: standalone` e cores, para virar PWA.
 
 ### Servidor (`app.py`)
@@ -93,10 +94,18 @@ Três arquivos em `~/homelab/tuya-local/`:
 
 A v1 já deixa estas portas abertas, sem implementar nada além disso:
 
-- **Brilho, cor e cenas:** o servidor já aceita qualquer DP do `mapping`,
-  e o `/api/state` já entrega os DPs crus. Adicionar esses controles é
-  trabalho só da página. O `mapping` do `devices.json` traz os limites
-  (`bright_value_v2` 10–1000, `colour_data_v2` em HSV etc.).
+- **Brilho, cor e efeitos (feito em 2026-09-18):** a página ganhou o cartão
+  expandido estilo iOS (segurar o bloco), prototipado em `/proto` e
+  aprovado pelo João. O `/api/set/<id>` passou a receber `{"dps": {...}}`
+  e grava tudo num `set_multiple_values`, porque modo + cor precisam ir
+  juntos. O `view()` expõe `codes` (código → DP), e o `check()` valida o
+  range dos `Enum`. A tradução DP ↔ tela fica em `codec.js`, testado com
+  `node codec.test.mjs`: cor `hhhhssssvvvv`, brilho da fita = v, e os 8
+  efeitos são montados no formato do aparelho, porque os de fábrica ficam
+  no app da Tuya e não no aparelho. "Boa noite" confere byte a byte com o
+  valor lido do Abajur. Os 4 efeitos de branco valem só para as lâmpadas.
+  A página manda no máximo uma escrita por vez por aparelho e junta o que
+  chega durante um arrasto, com 250 ms entre os envios.
 - **Timers (feito em 2026-09-18):** usa o `countdown_1` do próprio aparelho
   (`9` nos interruptores e tomadas, `26` nas lâmpadas; as fitas não têm).
   Ao zerar, o aparelho inverte o estado. O `view()` expõe `timer_dp`, e o

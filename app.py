@@ -32,8 +32,9 @@ def view(d, entry):
         if m["code"] == "cur_power" and k in dps:
             watts = dps[k] / 10 ** m["values"].get("scale", 0)
     timer_dp = next((k for k, m in d["mapping"].items() if m["code"] == "countdown_1"), None)
+    codes = {m["code"]: k for k, m in d["mapping"].items()}  # a página acha brilho/cor/cena pelo código
     return {"id": d["id"], "name": d["name"], "group": group, "dp": dp, "on": dps.get(dp),
-            "online": entry["online"], "watts": watts, "timer_dp": timer_dp, "dps": dps}
+            "online": entry["online"], "watts": watts, "timer_dp": timer_dp, "codes": codes, "dps": dps}
 
 
 def check(d, dp, value):
@@ -46,6 +47,18 @@ def check(d, dp, value):
     lim = m["values"]
     if t is int and isinstance(lim, dict) and not lim.get("min", value) <= value <= lim.get("max", value):
         return f"DP {dp} de {d['name']} aceita de {lim.get('min')} a {lim.get('max')}"
+    if m["type"] == "Enum" and isinstance(lim, dict) and value not in lim.get("range", [value]):
+        return f"DP {dp} de {d['name']} aceita {', '.join(lim['range'])}"
+    return None
+
+
+def check_dps(d, dps):
+    """Valida um comando com vários DPs; um valor ruim recusa o comando inteiro."""
+    if not isinstance(dps, dict) or not dps:
+        return 'corpo esperado: {"dps": {"<dp>": <valor>, ...}}'
+    for dp, value in dps.items():
+        if err := check(d, str(dp), value):
+            return err
     return None
 
 
@@ -110,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/manifest.json": ("manifest.json", "application/manifest+json"),
-                 "/proto": ("proto.html", "text/html; charset=utf-8")}  # protótipo do cartão expandido, sai depois
+                 "/codec.js": ("codec.js", "text/javascript; charset=utf-8")}
         path = self.path.split("?")[0]
         if path in files:
             name, ctype = files[path]
@@ -124,15 +137,16 @@ class Handler(BaseHTTPRequestHandler):
         if id == self.path or id not in DEVS:
             return self.reply(404, {"error": "aparelho não encontrado"})
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
-            dp, value = str(body["dp"]), body["value"]
+            dps = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))["dps"]
         except (ValueError, KeyError, TypeError):
-            return self.reply(400, {"error": 'corpo esperado: {"dp": ..., "value": ...}'})
-        if err := check(DEVS[id], dp, value):
+            dps = None
+        if err := check_dps(DEVS[id], dps):
             return self.reply(400, {"error": err})
+        dps = {str(k): v for k, v in dps.items()}
         if id not in CONN:
             return self.reply(502, {"error": "aparelho ainda não achado na rede"})
-        if err := refresh(id, lambda dev: dev.set_value(dp, value)):
+        # um comando só: trocar modo + cor em duas chamadas faria a lâmpada piscar no modo errado
+        if err := refresh(id, lambda dev: dev.set_multiple_values(dps)):
             return self.reply(502, {"error": err})
         self.reply(200, view(DEVS[id], CACHE[id]))
 
@@ -159,7 +173,9 @@ def selftest():
         "19": {"code": "cur_power", "type": "Integer", "values": {"unit": "W", "scale": 1}}}}
     ir = {"id": "b", "name": "Controle Remoto", "category": "wnykq", "mapping": {}}
     abajur = {"id": "c", "name": "Abajur", "category": "dj", "mapping": {
-        "20": {"code": "switch_led", "type": "Boolean", "values": {}}}}
+        "20": {"code": "switch_led", "type": "Boolean", "values": {}},
+        "21": {"code": "work_mode", "type": "Enum", "values": {"range": ["white", "colour", "scene", "music"]}},
+        "24": {"code": "colour_data_v2", "type": "Json", "values": {}}}}
 
     # IR sai; lâmpadas (dj) vêm antes de tomadas (cz)
     assert load([ir, pc, abajur]) == [abajur, pc]
@@ -180,6 +196,14 @@ def selftest():
     assert check(pc, "9", 1800) is None
     assert check(pc, "9", -1)      # abaixo do min do mapping
     assert check(pc, "9", 86401)   # acima do max do mapping
+    assert check(abajur, "21", "colour") is None
+    assert check(abajur, "21", "disco")  # fora do range do Enum
+
+    assert view(abajur, {"online": True, "dps": {}})["codes"]["colour_data_v2"] == "24"
+    assert check_dps(abajur, {"20": True, "21": "colour", "24": "0115035c03e8"}) is None
+    assert check_dps(abajur, {"20": True, "21": "disco"})  # um valor ruim recusa o comando inteiro
+    assert check_dps(abajur, {})
+    assert check_dps(abajur, ["20", True])
     print("selftest ok")
 
 
