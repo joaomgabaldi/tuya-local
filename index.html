@@ -487,12 +487,21 @@ $('overlay').addEventListener('click', () => closeCard());
     dy = Math.max(0, e.clientY - y0);
     $('card').style.transform = `translateY(${dy}px)`;
   });
+  const snapBack = () => {
+    $('card').animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 250, easing: 'cubic-bezier(.2, .9, .25, 1.1)'});
+    $('card').style.transform = '';
+  };
   grab.addEventListener('pointerup', () => {
     if (y0 === null) return;
     y0 = null;
     if (dy > 90) return closeCard(dy);
-    $('card').animate([{transform: `translateY(${dy}px)`}, {transform: 'none'}], {duration: 250, easing: 'cubic-bezier(.2, .9, .25, 1.1)'});
-    $('card').style.transform = '';
+    snapBack();
+  });
+  // gesto cancelado pelo sistema: o cartão volta para o lugar (sem isso ficava deslocado na tela)
+  grab.addEventListener('pointercancel', () => {
+    if (y0 === null) return;
+    y0 = null;
+    snapBack();
   });
 })();
 
@@ -591,6 +600,13 @@ function brightPill(tg) {
   p.addEventListener('pointerup', () => {
     if (y0 !== null && !moved) { tg.apply({[it.dp]: !tg.get().on}); }  // toque sem arrastar = liga/desliga
     else if (y0 !== null) tg.dragEnd();
+    p.classList.remove('dragging');
+    y0 = null;
+  });
+  // o iOS cancela o gesto (barra de início, ligação) com pointercancel, não pointerup: fecha o arrasto sem
+  // tratar como toque, senão a pílula ficava presa no estado de arrasto
+  p.addEventListener('pointercancel', () => {
+    if (y0 !== null && moved) tg.dragEnd();
     p.classList.remove('dragging');
     y0 = null;
   });

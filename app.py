@@ -85,8 +85,10 @@ def check_dps(d, dps):
 DEVS = {}   # id → aparelho do devices.json, na ordem de exibição
 CONN = {}   # id → tinytuya.Device; aparelho sem IP fica de fora até a descoberta achar
 CACHE = {}  # id → {"online": bool, "dps": dict}
-# ponytail: lock global, uma chamada por vez em toda a casa; trocar por lock por aparelho se o toque ficar lento
-LOCK = threading.Lock()
+# uma trava por aparelho: cada um aceita ~1 conexão local, mas aparelhos diferentes não esperam um pelo outro
+# (com trava global, um offline gastando o timeout de 3 s atrasava o toque em qualquer outro)
+LOCKS = {}
+lock_of = lambda id: LOCKS.setdefault(id, threading.Lock())  # setdefault é atômico no CPython
 
 
 def connect(d, ip, version):
@@ -101,7 +103,7 @@ def refresh(id, fn, sent={}):
     """Roda fn(device) sob o lock e junta ao cache o que foi enviado (`sent`) e, por cima, o que o aparelho
     respondeu. As lâmpadas v3.4/v3.5 às vezes só confirmam parte dos DPs de um comando aceito; sem o `sent`
     o cache ficava com o valor antigo e o comando seguinte saía com dado velho. Devolve o erro ou None."""
-    with LOCK:
+    with lock_of(id):
         r = fn(CONN[id])
     entry = CACHE[id]
     if isinstance(r, dict) and "dps" in r:
@@ -116,7 +118,7 @@ def read_settings(id):
     """DP 33 (estado ao voltar a energia) não vem no status: pede com updatedps e junta ao cache o que chegar.
     A lâmpada responde um DP por mensagem; lê até ela parar. Devolve o erro ou None."""
     dev, got = CONN[id], {}
-    with LOCK:
+    with lock_of(id):
         dev.set_socketPersistent(True)
         try:
             r = dev.updatedps([33])
@@ -134,14 +136,20 @@ def read_settings(id):
     return None
 
 
+RAW_LOCK = threading.Lock()
+
+
 def remember_raw(id, dps):
     """Guarda em disco os DPs que o aparelho não devolve numa leitura (gradiente), para mostrar o valor atual."""
     keep = {k: v for k, v in dps.items() if k in WRITE_ONLY}
     if not keep:
         return
-    known = json.loads(RAW_FILE.read_text()) if RAW_FILE.exists() else {}
-    known[id] = {**known.get(id, {}), **keep}
-    RAW_FILE.write_text(json.dumps(known))
+    with RAW_LOCK:  # ler-alterar-gravar sob trava, e gravação atômica: comandos simultâneos não perdem entrada
+        known = json.loads(RAW_FILE.read_text()) if RAW_FILE.exists() else {}
+        known[id] = {**known.get(id, {}), **keep}
+        tmp = RAW_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(known))
+        tmp.replace(RAW_FILE)
 
 
 def poll():
@@ -171,6 +179,7 @@ def db():
 
 def record(id, watts, now):
     """Acumula a amostra no minuto corrente; quando o minuto vira, grava a média do anterior."""
+    # ponytail: um restart perde o minuto corrente (< 60 s por tomada); gravar no SIGTERM se isso um dia importar
     m = int(now) - int(now) % 60
     cur = _minute.get(id)
     if cur and cur[0] != m:
@@ -200,15 +209,22 @@ def history(id, rng, now):
             "kwh": kwh, "avg_w": None if avg is None else round(avg, 1)}
 
 
+def discover_once(scan):
+    """Uma varredura de broadcast para todos os aparelhos sem IP (e não uma de ~18 s por aparelho)."""
+    missing = [i for i in DEVS if i not in CONN]
+    for i, b in scan(missing).items():
+        if i in missing and b.get("ip"):
+            CONN[i] = connect(DEVS[i], b["ip"], b["version"])
+            print(f"{DEVS[i]['name']} achado em {b['ip']}", flush=True)
+
+
 def discover():
     """Aparelho sem IP no devices.json (ex.: offline no wizard): procura pelo broadcast até achar."""
-    import tinytuya
-    while missing := [i for i in DEVS if i not in CONN]:
-        for i in missing:
-            b = tinytuya.find_device(i)  # ~18 s escutando broadcast, sem lock: não abre conexão
-            if b["ip"]:
-                CONN[i] = connect(DEVS[i], b["ip"], b["version"])
-                print(f"{DEVS[i]['name']} achado em {b['ip']}", flush=True)
+    from tinytuya import scanner
+    # só escuta broadcast (não abre conexão), então não precisa de trava; para cedo se achar todos
+    scan = lambda ids: scanner.devices(verbose=False, poll=False, byID=True, wantids=ids)
+    while any(i not in CONN for i in DEVS):
+        discover_once(scan)
         time.sleep(60)
 
 
@@ -473,6 +489,37 @@ def selftest():
     RAW_FILE = Path(tempfile.mkdtemp()) / "raw-dps.json"
     remember_raw("g", {"35": "AAAF3AADIA==", "20": False})
     assert json.loads(RAW_FILE.read_text()) == {"g": {"35": "AAAF3AADIA=="}}
+    # 1a: trava por aparelho: um aparelho lento (offline, 3 s de timeout) não atrasa comando para outro
+    class Slow:
+        def status(self): time.sleep(0.6); return None
+    class Fast:
+        def set_multiple_values(self, dps): return {"dps": dps}
+    DEVS["lento"], CONN["lento"], CACHE["lento"] = abajur, Slow(), {"online": True, "dps": {}}
+    DEVS["rapido"], CONN["rapido"], CACHE["rapido"] = abajur, Fast(), {"online": True, "dps": {}}
+    t = threading.Thread(target=refresh, args=("lento", lambda d: d.status()))
+    t.start(); time.sleep(0.05)
+    t0 = time.time()
+    assert refresh("rapido", lambda d: d.set_multiple_values({"20": True}), sent={"20": True}) is None
+    assert time.time() - t0 < 0.3, "o comando esperou o aparelho lento"
+    t.join()
+
+    # 1b: gravações simultâneas no raw-dps.json não perdem entrada nem deixam o arquivo pela metade
+    RAW_FILE = Path(tempfile.mkdtemp()) / "raw-dps.json"
+    ts = [threading.Thread(target=remember_raw, args=(f"d{i}", {"35": "AAAF3AADIA=="})) for i in range(20)]
+    for x in ts: x.start()
+    for x in ts: x.join()
+    assert len(json.loads(RAW_FILE.read_text())) == 20
+
+    # 2b: uma varredura só para todos os aparelhos sem IP
+    calls = []
+    def scan(wanted):
+        calls.append(sorted(wanted))
+        return {"semip1": {"ip": "192.168.0.201", "version": "3.4"}}
+    DEVS["semip1"] = DEVS["semip2"] = {**abajur, "key": "0123456789abcdef"}
+    CONN.pop("semip1", None); CONN.pop("semip2", None)
+    discover_once(scan)
+    assert len(calls) == 1 and {"semip1", "semip2"} <= set(calls[0])
+    assert CONN["semip1"].address == "192.168.0.201" and "semip2" not in CONN
     print("selftest ok")
 
 
