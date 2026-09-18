@@ -132,6 +132,7 @@
   .sw.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
   .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -20px; padding: 0 20px; }
   .chips::-webkit-scrollbar { display: none; }
+  .chips.wrap { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
   .chip { flex: none; font: inherit; font-size: 15px; color: var(--txt); background: var(--chip); border: 0;
           border-radius: 999px; padding: 8px 14px; cursor: pointer; }
   .chip.sel { background: var(--txt); color: var(--card-solid); }
@@ -184,7 +185,7 @@
   <div id="c-body"></div>
 </div>
 <script type="module">
-import {readLight, brightCmd, colourCmd, whiteCmd, effectCmd, effectsFor, stateDps, EFFECTS} from '/codec.js';
+import {readLight, brightCmd, colourCmd, whiteCmd, effectCmd, stateDps} from '/codec.js';
 
 const COLORS = [[0, 900], [28, 950], [50, 950], [120, 700], [185, 800], [215, 900], [270, 750], [320, 800]];  // h, s
 const WHITES = [[0, '#ffc98a'], [30, '#ffe0b8'], [60, '#fff4e6'], [100, '#e6efff']];  // temperatura %, cor na tela
@@ -216,7 +217,7 @@ function status(it, watts = true) {
   if (watts && it.on && it.watts != null) parts.push(`${it.watts.toFixed(1).replace('.', ',')} W`);
   if (it.on && isLight(it)) {
     const l = readLight(it);
-    parts.push(l.mode === 'scene' ? EFFECTS[l.scene]?.name ?? 'Efeito' : `${l.bright}%`);
+    parts.push(l.mode === 'scene' ? it.effects[l.effect]?.name ?? 'Efeito' : `${l.bright}%`);
   }
   const left = it.timer_dp ? it.dps[it.timer_dp] || 0 : 0;
   if (left) parts.push(`⏱ ${Math.ceil(left / 60)} min`);
@@ -513,9 +514,10 @@ function renderDevice(tg, extra = []) {
     body.append(el('div', {className: 'row-title', textContent: 'Cores'}), swatchRow(
       COLORS.map(([h, s]) => ({c: `hsl(${h} ${s / 10}% 58%)`, sel: l.mode === 'colour' && l.h === h && l.s === s,
                                pick: () => tg.apply(colourCmd(tg.get(), h, s))})), tg, whites));
-    tools.push({key: 'fx', icon: 'sparkles', label: 'Efeitos', badge: l.mode === 'scene' && it.on ? '•' : '',
-      build: box => box.append(chipRow(effectsFor(it).map(([i, e]) => ({
-        label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))))});
+    // efeitos de fábrica do modelo (effects.json); lista longa (fitas: 30) quebra em linhas em vez de rolar de lado
+    if (it.effects.length) tools.push({key: 'fx', icon: 'sparkles', label: 'Efeitos', badge: l.mode === 'scene' && it.on ? '•' : '',
+      build: box => box.append(chipRow(it.effects.map((e, i) => ({
+        label: e.name, sel: l.mode === 'scene' && l.effect === i, pick: () => tg.apply(effectCmd(tg.get(), i))})), it.effects.length > 8))});
   } else {
     const b = el('button', {className: 'power' + (it.on ? ' on' : ''), ariaLabel: 'Liga/desliga'}, icon('power', it.watts != null ? 34 : 46));
     b.setAttribute('aria-pressed', String(!!it.on));
@@ -606,8 +608,8 @@ function swatchRow(items, tg, after = []) {
   return row;
 }
 
-function chipRow(items) {
-  const row = el('div', {className: 'chips'});
+function chipRow(items, wrap = false) {
+  const row = el('div', {className: 'chips' + (wrap ? ' wrap' : '')});
   for (const c of items) {
     const b = el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label, onclick: () => {
       if ('sel' in c) { row.querySelectorAll('.chip.sel').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); }

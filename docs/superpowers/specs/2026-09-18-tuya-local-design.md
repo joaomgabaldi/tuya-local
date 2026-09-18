@@ -141,6 +141,17 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   de login. Se um dia a tailnet for compartilhada, o controle é pelas ACLs
   do Tailscale, não pela página.
 
+## Efeitos de fábrica (2026-09-18)
+
+Os 8 efeitos montados à mão saíram. Os efeitos originais foram capturados do app da Tuya,
+efeito por efeito, com o João ativando cada um e o poll gravando o DP 25. Ficam em
+`effects.json`, uma lista por modelo (`product_id`): L1/L2 com 8, Abajur/Spot com 8 (o
+Spot foi presumido igual ao Abajur) e as fitas com 30. Os nomes são os do app, e os
+cortados com "…" foram completados pelas cores. O `view()` entrega `effects` junto com
+cada aparelho, e a página manda exatamente o texto capturado. O efeito ativo é
+reconhecido pelo **número** (2 primeiros dígitos, únicos em cada lista), porque a fita
+reescreve o valor que recebe: troca a velocidade ou devolve só um resumo `NN466401…`.
+
 ## Cenas da casa (desenho aprovado em 2026-09-18)
 
 - **Página:** seção "Cenas" no topo, com blocos só com o nome (sem ícone,

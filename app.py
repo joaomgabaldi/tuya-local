@@ -18,6 +18,8 @@ POLL_EVERY = 10
 # categoria do wizard → (grupo na página, DP de liga/desliga); a ordem aqui é a ordem na página
 CATEGORIES = {"tdq": ("Interruptores", "1"), "dj": ("Lâmpadas", "20"),
               "dd": ("Fitas LED", "20"), "cz": ("Tomadas", "1")}
+# efeitos de fábrica por modelo (product_id), capturados do app da Tuya: o aparelho não guarda a lista, o app sim
+EFFECTS = json.loads((DIR / "effects.json").read_text())
 # tipo do mapping → tipo Python aceito na escrita (checado com `type() is`, então bool não passa por int)
 TYPES = {"Boolean": bool, "Integer": int, "Enum": str, "String": str, "Json": str}
 
@@ -38,7 +40,8 @@ def view(d, entry):
     timer_dp = next((k for k, m in d["mapping"].items() if m["code"] == "countdown_1"), None)
     codes = {m["code"]: k for k, m in d["mapping"].items()}  # a página acha brilho/cor/cena pelo código
     return {"id": d["id"], "name": d["name"], "group": group, "dp": dp, "on": dps.get(dp),
-            "online": entry["online"], "watts": watts, "timer_dp": timer_dp, "codes": codes, "dps": dps}
+            "online": entry["online"], "watts": watts, "timer_dp": timer_dp, "codes": codes,
+            "effects": EFFECTS.get(d.get("product_id"), {}).get("efeitos", []), "dps": dps}
 
 
 def check(d, dp, value):
@@ -340,6 +343,10 @@ def selftest():
     assert check(abajur, "21", "disco")  # fora do range do Enum
 
     assert view(abajur, {"online": True, "dps": {}})["codes"]["colour_data_v2"] == "24"
+    global EFFECTS
+    EFFECTS = {"pidX": {"modelo": "teste", "efeitos": [{"name": "Boa noite", "data": "00280d"}]}}
+    assert view({**abajur, "product_id": "pidX"}, {"online": True, "dps": {}})["effects"] == [{"name": "Boa noite", "data": "00280d"}]
+    assert view(pc, {"online": True, "dps": {}})["effects"] == []  # modelo sem efeitos
     assert check_dps(abajur, {"20": True, "21": "colour", "24": "0115035c03e8"}) is None
     assert check_dps(abajur, {"20": True, "21": "disco"})  # um valor ruim recusa o comando inteiro
     assert check_dps(abajur, {})
