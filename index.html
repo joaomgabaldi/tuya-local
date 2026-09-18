@@ -9,6 +9,7 @@
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f2f7">
 <link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon.png">
 <link rel="manifest" href="/manifest.json">
 <title>Casa</title>
 <style>
@@ -37,6 +38,9 @@
   h1 { font-size: 34px; font-weight: 700; margin: 8px 0 4px; letter-spacing: -.02em; }
   h2 { font-size: 20px; font-weight: 600; margin: 22px 0 10px; }
   .erro { color: var(--danger); font-size: 15px; min-height: 1.2em; margin: 4px 0; }
+  /* no cartão a linha de erro não reserva espaço: sem erro, some (sem margem nem altura) */
+  #c-erro { min-height: 0; margin: 0; overflow: hidden; }
+  #c-erro:empty { display: none; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
   .tile { position: relative; box-sizing: border-box; height: 72px; padding: 10px 12px; border-radius: 16px;
@@ -205,10 +209,11 @@ function colorOf(it) {
   return `hsl(${l.h} ${l.s / 10}% 58%)`;
 }
 // ligado/desligado já aparece no bloco aceso e no ícone; o texto fica só para o que é especial
-function status(it) {
+// watts=false no cabeçalho do cartão da tomada: lá a potência já aparece grande ao lado do ⏻
+function status(it, watts = true) {
   if (!it.online) return 'Sem resposta';
   const parts = [];
-  if (it.on && it.watts != null) parts.push(`${it.watts.toFixed(1).replace('.', ',')} W`);
+  if (watts && it.on && it.watts != null) parts.push(`${it.watts.toFixed(1).replace('.', ',')} W`);
   if (it.on && isLight(it)) {
     const l = readLight(it);
     parts.push(l.mode === 'scene' ? EFFECTS[l.scene]?.name ?? 'Efeito' : `${l.bright}%`);
@@ -237,7 +242,19 @@ function icon(name, size = 20) {
   return s;
 }
 const iconOf = it => ({'Fitas LED': 'strip', 'Tomadas': 'plug'})[it.group] ?? 'bulb';
-function showError(msg) { $('erro').textContent = $('c-erro').textContent = msg; }
+function showError(msg) {
+  $('erro').textContent = msg;
+  const e = $('c-erro'), had = e.textContent;
+  if (had === msg) return;
+  e.getAnimations().forEach(a => a.cancel());
+  if (msg && !had) {  // aparece: abre a altura
+    e.textContent = msg;
+    if (!$('card').hidden) e.animate([{height: '0px', opacity: 0}, {height: e.scrollHeight + 'px', opacity: 1}], {duration: 220, easing: 'ease-out'});
+  } else if (!msg && !$('card').hidden) {  // some: fecha a altura e só então esvazia
+    e.animate([{height: e.offsetHeight + 'px', opacity: 1}, {height: '0px', opacity: 0}], {duration: 180, easing: 'ease-in'})
+      .onfinish = () => { if (e.textContent === had) e.textContent = ''; };
+  } else e.textContent = msg;
+}
 
 // ---- servidor ----
 async function load() {
@@ -246,7 +263,12 @@ async function load() {
     last = await r.json();
     if (!outbox.size) showError('');
     render();
-    if (current?.kind === 'device') $('c-sub').textContent = status(byId(current.id));
+    if (current?.kind === 'device') {
+      const it = byId(current.id);
+      $('c-sub').textContent = status(it, false);
+      const big = $('card').querySelector('.now .big');  // potência de agora acompanha o poll
+      if (big && it.watts != null) big.textContent = it.on ? `${num(it.watts, 1)} W` : '—';
+    }
   } catch (e) {
     showError('Sem conexão com o servidor');
   }
@@ -477,7 +499,7 @@ const liveTarget = id => ({
 function renderDevice(tg, extra = []) {
   const it = tg.get();
   $('c-name').textContent = it.name;
-  $('c-sub').textContent = status(it);
+  $('c-sub').textContent = status(it, false);
   const body = $('c-body'), tools = [];
   body.append(...extra);
   if (isLight(it)) {
