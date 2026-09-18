@@ -31,7 +31,10 @@ baterias) fica de fora automaticamente.
 
 Todos os 16 com IP responderam a `status()` em 2026-09-18 com a versão do
 `devices.json` (3.3, 3.4 e 3.5 misturados). A Lavanderia está offline e sem
-IP no arquivo: ela usa `address='Auto'` (tinytuya localiza pelo broadcast).
+IP no arquivo. Uma thread de descoberta chama `tinytuya.find_device(id)` a
+cada 60 s até achar o aparelho, e aí ele passa a ser consultado. Não usamos
+`address='Auto'`: ele varre a rede por ~18 s dentro do construtor e dá erro
+se o aparelho estiver offline, e isso derrubaria o servidor na partida.
 
 A tomada PC não tem confirmação: um toque alterna, como os outros (decisão do
 João).
@@ -59,7 +62,7 @@ Três arquivos em `~/homelab/tuya-local/`:
   Se o tempo de resposta incomodar, trocar por um lock por aparelho.
 - **Endpoints:**
   - `GET /` → `index.html`; `GET /manifest.json`.
-  - `GET /api/state` → lista `[{id, name, group, on, online, watts, dps}]`
+  - `GET /api/state` → lista `[{id, name, group, dp, on, online, watts, dps}]`
     na ordem dos grupos acima e alfabética dentro deles.
   - `POST /api/set/<id>` com corpo `{"dp": "20", "value": true}` →
     `set_value(dp, value)`, atualiza o cache com a resposta do aparelho e
@@ -67,7 +70,8 @@ Três arquivos em `~/homelab/tuya-local/`:
     aparelho → 502 com a mensagem do tinytuya. Um DP que não está no
     `mapping` do aparelho → 400.
 - Escuta só em `192.168.0.2:8090` (IP da LAN do host). Não escuta no
-  Tailscale nem na internet.
+  Tailscale nem na internet. O ufw está ativo, então a porta precisa de
+  `ufw allow from 192.168.0.0/24 to any port 8090 proto tcp`.
 
 ### Página (`index.html`)
 
@@ -105,6 +109,7 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   `WorkingDirectory=/home/joao/homelab/tuya-local`,
   `ExecStart=.venv/bin/python app.py`, `Restart=on-failure`. A instalação
   precisa de sudo, que o João roda.
+- A unit fica versionada em `tuya-local.service`, e a instalação é um `cp`.
 - Dependências: `.venv` do projeto, só com o `tinytuya`.
 - Novo aparelho ou troca de chave: rodar `tinytuya wizard` de novo na pasta
   (as credenciais estão no `tinytuya.json`) e reiniciar a unit.
