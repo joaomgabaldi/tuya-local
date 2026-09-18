@@ -233,8 +233,7 @@ class Handler(BaseHTTPRequestHandler):
                  "/manifest.json": ("manifest.json", "application/manifest+json"),
                  "/codec.js": ("codec.js", "text/javascript; charset=utf-8"),
                  "/icon-180.png": ("icon-180.png", "image/png"),
-                 "/icon-512.png": ("icon-512.png", "image/png"),
-                 "/proto": ("proto.html", "text/html; charset=utf-8")}  # candidata do visual novo, sai ao ser promovida
+                 "/icon-512.png": ("icon-512.png", "image/png")}
         path = self.path.split("?")[0]
         if path in files:
             name, ctype = files[path]
