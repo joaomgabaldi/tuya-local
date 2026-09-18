@@ -165,7 +165,8 @@
   svg.chart .bar.dim { opacity: .35; }
   svg.chart .cross { stroke: var(--sub); stroke-width: 1; }
   svg.chart .dot-mark { fill: var(--chart); stroke: var(--card-solid); stroke-width: 2; }
-  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
+             clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -763,15 +764,16 @@ function dayBars(h, readout) {
   return svg;
 }
 
-// a mesma informação em tabela, para leitor de tela
+// a mesma informação em tabela, para leitor de tela. O sr-only vai numa div em volta: numa <table> o height: 1px
+// não vale (tabela nunca fica menor que o conteúdo) e as 288 linhas viravam espaço de rolagem vazio no cartão
 function dataTable(h) {
-  const t = el('table', {className: 'sr-only'});
+  const t = el('table');
   t.append(el('caption', {textContent: `Consumo, ${RANGE_LABEL[h.range]}`}));
   for (const [k, v] of h.points) {
     const label = typeof k === 'number' ? new Date(k * 1000).toLocaleString('pt-BR') : k;
     t.append(el('tr', {}, el('td', {textContent: label}), el('td', {textContent: h.unit === 'W' ? `${num(v, 0)} W` : `${num(v, 2)} kWh`})));
   }
-  return t;
+  return el('div', {className: 'sr-only'}, t);
 }
 
 // ---- cenas: editor ----
