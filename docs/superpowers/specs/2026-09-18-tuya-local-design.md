@@ -10,7 +10,9 @@ aparelhos pela LAN via tinytuya, sem o app da Tuya. Nuvem e controle local
 convivem; nada é bloqueado no DNS.
 
 Ficam para as próximas versões, que já estão certas: brilho, cor, cenas,
-timers, autenticação, acesso fora da LAN e histórico de consumo. A v1 não
+timers e histórico de consumo. O acesso fora da LAN entrou em 2026-09-18
+pelo Tailscale (ver "Acesso"). **A página não tem login e não vai ter:** é
+decisão fixa do João, não pendência. A v1 não
 implementa nenhum deles, mas também não pode atrapalhar a entrada deles.
 Por isso o cache guarda os DPs crus e a escrita é genérica (ver
 "Preparado para as próximas versões").
@@ -69,8 +71,9 @@ Três arquivos em `~/homelab/tuya-local/`:
     devolve o item. Na v1 a página só manda o DP de liga/desliga. Erro do
     aparelho → 502 com a mensagem do tinytuya. Um DP que não está no
     `mapping` do aparelho → 400.
-- Escuta só em `192.168.0.2:8090` (IP da LAN do host). Não escuta no
-  Tailscale nem na internet. O ufw está ativo, então a porta precisa de
+- Escuta só em `192.168.0.2:8090` (IP da LAN do host). O `app.py` não
+  escuta no Tailscale nem na internet. O acesso pelo Tailscale é um proxy
+  (ver "Acesso"). O ufw está ativo, então a porta precisa de
   `ufw allow from 192.168.0.0/24 to any port 8090 proto tcp`.
 
 ### Página (`index.html`)
@@ -96,12 +99,25 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   (`bright_value_v2` 10–1000, `colour_data_v2` em HSV etc.).
 - **Timers:** os aparelhos já têm `countdown_1` / DP `26`. Isso cabe no
   mesmo `/api/set`.
-- **Autenticação e acesso fora da LAN:** mudam juntos. O candidato
-  natural é passar a escutar também no Tailscale (100.68.157.30) e
-  adicionar a autenticação nesse momento, não antes.
 - **Histórico de consumo:** o poll já lê `cur_power` a cada 10 s. Gravar
   num SQLite, no mesmo padrão do `/opt/scripts/telemetria.db`, é um passo
   a mais no mesmo loop.
+
+## Acesso
+
+- **Em casa:** `http://192.168.0.2:8090`.
+- **De qualquer lugar, com o Tailscale ligado:**
+  `https://ubuntuserver.ainu-stairs.ts.net:8090`. Esse endereço é o
+  melhor para instalar na Tela de Início, porque funciona nos dois lugares.
+- A configuração é
+  `sudo tailscale serve --bg --https=8090 http://192.168.0.2:8090`, no
+  mesmo padrão das portas 5001 e 8443 do host. Ela fica salva no
+  tailscaled e sobrevive a reboot. Para conferir: `tailscale serve status`.
+- **Sem login, por decisão:** a tailnet só tem a conta do João e os
+  aparelhos dele. Quem chega pelo `.ts.net` já foi autenticado pelo
+  Tailscale, e quem chega pela LAN está dentro de casa. Não propor tela
+  de login. Se um dia a tailnet for compartilhada, o controle é pelas ACLs
+  do Tailscale, não pela página.
 
 ## Operação
 
