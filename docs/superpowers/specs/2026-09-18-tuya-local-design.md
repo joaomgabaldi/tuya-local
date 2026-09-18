@@ -1,6 +1,6 @@
 # Tuya local: página de liga/desliga pela LAN
 
-Data: 2026-09-18 · Status: aprovado em conversa, aguardando revisão desta spec
+Data: 2026-09-18 · Status: aprovada pelo João em 2026-09-18
 
 ## Objetivo
 
@@ -74,8 +74,8 @@ Três arquivos em `~/homelab/tuya-local/`:
 - Grade de blocos grandes, com título de cada grupo. O bloco ligado fica
   aceso, o offline fica apagado e não aceita toque. As tomadas mostram os
   watts.
-- Tocar faz `POST /api/set/<id>` com o DP de liga/desliga e `!on`. O bloco fica em "aguardando" até a
-  resposta e mostra o erro se falhar.
+- Tocar faz `POST /api/set/<id>` com o DP de liga/desliga e `!on`. O
+  bloco fica em "aguardando" até a resposta e mostra o erro se falhar.
 - Busca `/api/state` a cada 5 s enquanto a aba está visível
   (`visibilitychange`).
 - Meta tags para o iOS (`apple-mobile-web-app-capable`, viewport) e o
