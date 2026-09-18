@@ -109,7 +109,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         files = {"/": ("index.html", "text/html; charset=utf-8"),
-                 "/manifest.json": ("manifest.json", "application/manifest+json")}
+                 "/manifest.json": ("manifest.json", "application/manifest+json"),
+                 "/proto": ("proto.html", "text/html; charset=utf-8")}  # protótipo do cartão expandido, sai depois
         path = self.path.split("?")[0]
         if path in files:
             name, ctype = files[path]
