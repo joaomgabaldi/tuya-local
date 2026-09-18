@@ -155,7 +155,7 @@ import json, app
 ds = app.load(json.load(open('devices.json')))
 print(len(ds)); print([d['name'] for d in ds])"
 ```
-Expected: `17` e a lista começando por `Banheiro, Corredor, Cozinha, Lavanderia, Mesa, Sala` e terminando em `PC, Repelente`. Sem `Controle Remoto`, `CRCLMTZDOR`, `Bateria #1/#2` nem as entradas de IR.
+Expected: `16` (17 IPs − 2 hubs IR + Lavanderia) e a lista começando por `Banheiro, Corredor, Cozinha, Lavanderia, Mesa, Sala` e terminando em `PC, Repelente`. Sem `Controle Remoto`, `CRCLMTZDOR`, `Bateria #1/#2` nem as entradas de IR.
 
 - [ ] **Step 6: Commit**
 
@@ -318,7 +318,7 @@ curl -s http://192.168.0.2:8090/api/state | .venv/bin/python -c "
 import json,sys
 for x in json.load(sys.stdin): print(f\"{x['group']:13} {x['name']:22} online={x['online']} on={x['on']} watts={x['watts']}\")"
 ```
-Expected: 17 linhas; 16 com `online=True` e `on` True/False; Lavanderia `online=False`; PC e Repelente com `watts` numérico.
+Expected: 16 linhas; 15 com `online=True` e `on` True/False; Lavanderia `online=False`; PC e Repelente com `watts` numérico.
 
 - [ ] **Step 5: Caminhos de erro, sem escrever em aparelho**
 

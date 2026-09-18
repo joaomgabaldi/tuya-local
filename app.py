@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Página de liga/desliga dos aparelhos Tuya pela LAN (spec em docs/superpowers/specs)."""
+import sys
+import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+DIR = Path(__file__).resolve().parent
+HOST, PORT = "192.168.0.2", 8090
+POLL_EVERY = 10
+
+# categoria do wizard → (grupo na página, DP de liga/desliga); a ordem aqui é a ordem na página
+CATEGORIES = {"tdq": ("Interruptores", "1"), "dj": ("Lâmpadas", "20"),
+              "dd": ("Fitas LED", "20"), "cz": ("Tomadas", "1")}
+# tipo do mapping → tipo Python aceito na escrita (checado com `type() is`, então bool não passa por int)
+TYPES = {"Boolean": bool, "Integer": int, "Enum": str, "String": str, "Json": str}
+
+
+def load(devices):
+    order = list(CATEGORIES)
+    keep = [d for d in devices if d.get("category") in CATEGORIES]
+    return sorted(keep, key=lambda d: (order.index(d["category"]), d["name"]))
+
+
+def view(d, entry):
+    group, dp = CATEGORIES[d["category"]]
+    dps = entry["dps"]
+    watts = None
+    for k, m in d["mapping"].items():
+        if m["code"] == "cur_power" and k in dps:
+            watts = dps[k] / 10 ** m["values"].get("scale", 0)
+    return {"id": d["id"], "name": d["name"], "group": group, "dp": dp, "on": dps.get(dp),
+            "online": entry["online"], "watts": watts, "dps": dps}
+
+
+def check(d, dp, value):
+    m = d["mapping"].get(dp)
+    if not m:
+        return f"DP {dp} não existe em {d['name']}"
+    t = TYPES.get(m["type"])
+    if t and type(value) is not t:
+        return f"DP {dp} de {d['name']} espera {m['type']}"
+    return None
+
+
+def selftest():
+    pc = {"id": "a", "name": "PC", "category": "cz", "mapping": {
+        "1": {"code": "switch_1", "type": "Boolean", "values": {}},
+        "19": {"code": "cur_power", "type": "Integer", "values": {"unit": "W", "scale": 1}}}}
+    ir = {"id": "b", "name": "Controle Remoto", "category": "wnykq", "mapping": {}}
+    abajur = {"id": "c", "name": "Abajur", "category": "dj", "mapping": {
+        "20": {"code": "switch_led", "type": "Boolean", "values": {}}}}
+
+    # IR sai; lâmpadas (dj) vêm antes de tomadas (cz)
+    assert load([ir, pc, abajur]) == [abajur, pc]
+
+    v = view(pc, {"online": True, "dps": {"1": True, "19": 823}})
+    assert (v["group"], v["dp"], v["on"], v["watts"]) == ("Tomadas", "1", True, 82.3)
+    v = view(abajur, {"online": True, "dps": {"20": False}})
+    assert (v["group"], v["dp"], v["on"], v["watts"]) == ("Lâmpadas", "20", False, None)
+    assert view(pc, {"online": False, "dps": {}})["watts"] is None
+
+    assert check(pc, "1", True) is None
+    assert check(pc, "19", 500) is None
+    assert check(pc, "99", True)   # DP fora do mapping
+    assert check(pc, "1", 1)       # int não passa como Boolean
+    assert check(pc, "19", True)   # bool não passa como Integer
+    print("selftest ok")
+
+
+if __name__ == "__main__":
+    if "--selftest" in sys.argv:
+        selftest()
