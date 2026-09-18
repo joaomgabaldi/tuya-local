@@ -31,8 +31,9 @@ def view(d, entry):
     for k, m in d["mapping"].items():
         if m["code"] == "cur_power" and k in dps:
             watts = dps[k] / 10 ** m["values"].get("scale", 0)
+    timer_dp = next((k for k, m in d["mapping"].items() if m["code"] == "countdown_1"), None)
     return {"id": d["id"], "name": d["name"], "group": group, "dp": dp, "on": dps.get(dp),
-            "online": entry["online"], "watts": watts, "dps": dps}
+            "online": entry["online"], "watts": watts, "timer_dp": timer_dp, "dps": dps}
 
 
 def check(d, dp, value):
@@ -42,6 +43,9 @@ def check(d, dp, value):
     t = TYPES.get(m["type"])
     if t and type(value) is not t:
         return f"DP {dp} de {d['name']} espera {m['type']}"
+    lim = m["values"]
+    if t is int and isinstance(lim, dict) and not lim.get("min", value) <= value <= lim.get("max", value):
+        return f"DP {dp} de {d['name']} aceita de {lim.get('min')} a {lim.get('max')}"
     return None
 
 
@@ -150,6 +154,7 @@ def main():
 def selftest():
     pc = {"id": "a", "name": "PC", "category": "cz", "mapping": {
         "1": {"code": "switch_1", "type": "Boolean", "values": {}},
+        "9": {"code": "countdown_1", "type": "Integer", "values": {"unit": "s", "min": 0, "max": 86400}},
         "19": {"code": "cur_power", "type": "Integer", "values": {"unit": "W", "scale": 1}}}}
     ir = {"id": "b", "name": "Controle Remoto", "category": "wnykq", "mapping": {}}
     abajur = {"id": "c", "name": "Abajur", "category": "dj", "mapping": {
@@ -163,12 +168,17 @@ def selftest():
     v = view(abajur, {"online": True, "dps": {"20": False}})
     assert (v["group"], v["dp"], v["on"], v["watts"]) == ("Lâmpadas", "20", False, None)
     assert view(pc, {"online": False, "dps": {}})["watts"] is None
+    assert view(pc, {"online": True, "dps": {}})["timer_dp"] == "9"
+    assert view(abajur, {"online": True, "dps": {}})["timer_dp"] is None  # sem countdown_1 (ex.: fitas)
 
     assert check(pc, "1", True) is None
     assert check(pc, "19", 500) is None
     assert check(pc, "99", True)   # DP fora do mapping
     assert check(pc, "1", 1)       # int não passa como Boolean
     assert check(pc, "19", True)   # bool não passa como Integer
+    assert check(pc, "9", 1800) is None
+    assert check(pc, "9", -1)      # abaixo do min do mapping
+    assert check(pc, "9", 86401)   # acima do max do mapping
     print("selftest ok")
 
 

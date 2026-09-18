@@ -10,55 +10,133 @@
 <link rel="manifest" href="/manifest.json">
 <title>Casa</title>
 <style>
-  :root { color-scheme: dark; --bg: #111; --off: #242424; --on: #f5c542; --txt: #eee; }
+  :root { color-scheme: dark; --bg: #111; --off: #242424; --on: #f5c542; --txt: #eee; --sheet: #1c1c1c; }
   body { margin: 0; padding: 16px; padding-top: max(16px, env(safe-area-inset-top));
          background: var(--bg); color: var(--txt); font: 16px -apple-system, system-ui, sans-serif; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 20px 0 8px; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-  button { all: unset; box-sizing: border-box; min-height: 84px; padding: 12px; border-radius: 14px;
+  .grid button { all: unset; box-sizing: border-box; min-height: 84px; padding: 12px; border-radius: 14px;
            background: var(--off); display: flex; flex-direction: column; justify-content: space-between;
-           cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  button:focus-visible { outline: 2px solid var(--on); }
-  button.on { background: var(--on); color: #111; }
-  button.offline { opacity: .35; pointer-events: none; }
-  button.busy { opacity: .6; }
+           cursor: pointer; -webkit-tap-highlight-color: transparent;
+           -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+  .grid button:focus-visible { outline: 2px solid var(--on); }
+  .grid button.on { background: var(--on); color: #111; }
+  .grid button.offline { opacity: .35; pointer-events: none; }
+  .grid button.busy { opacity: .6; }
   small { opacity: .75; font-size: 13px; }
   #erro { color: #f77; min-height: 1.2em; }
+
+  /* painel de ajustes: abre ao tocar e segurar um bloco */
+  dialog { margin: auto 0 0; width: 100%; max-width: none; box-sizing: border-box; border: 0;
+           border-radius: 18px 18px 0 0; background: var(--sheet); color: var(--txt);
+           padding: 16px 16px max(20px, env(safe-area-inset-bottom)); }
+  dialog::backdrop { background: rgb(0 0 0 / .5); }
+  dialog header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  dialog p { margin: 12px 0 8px; opacity: .8; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  dialog button, dialog input { font: inherit; color: inherit; background: var(--off); border: 0;
+           border-radius: 10px; padding: 10px 14px; }
+  dialog input { width: 7.5em; }
+  dialog button.close { background: none; font-size: 20px; padding: 4px 8px; }
+  dialog button.danger { color: #f77; }
 </style>
 </head>
 <body>
 <div id="erro" role="status"></div>
 <main id="app"></main>
+<dialog id="sheet">
+  <header><strong id="sheet-name"></strong><button class="close" aria-label="Fechar">✕</button></header>
+  <div id="sheet-body"></div>
+</dialog>
 <script>
 const app = document.getElementById('app'), erro = document.getElementById('erro');
+const sheet = document.getElementById('sheet'), sheetName = document.getElementById('sheet-name'),
+      sheetBody = document.getElementById('sheet-body');
 const busy = new Set();
-let last = [];
+let last = [], pressing = false, sheetId = null;
+
+const el = (tag, props = {}, ...kids) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+};
+const timerLeft = it => it.timer_dp ? (it.dps[it.timer_dp] || 0) : 0;
 
 function render() {
+  if (pressing) return;  // re-render no meio do toque e segure perderia o gesto
   app.replaceChildren();
   let grid;
   for (const it of last) {
     if (!grid || grid.dataset.group !== it.group) {
-      const h = document.createElement('h2');
-      h.textContent = it.group;
-      grid = document.createElement('div');
-      grid.className = 'grid';
+      grid = el('div', {className: 'grid'});
       grid.dataset.group = it.group;
-      app.append(h, grid);
+      app.append(el('h2', {textContent: it.group}), grid);
     }
-    const b = document.createElement('button');
+    const left = timerLeft(it);
+    const status = !it.online ? ['offline'] : [
+      it.watts != null ? `${it.watts.toFixed(1)} W` : it.on ? 'ligado' : 'desligado',
+      left && `⏱ ${Math.ceil(left / 60)} min`,
+    ].filter(Boolean);
+    const b = el('button', {}, el('span', {textContent: it.name}), el('small', {textContent: status.join(' · ')}));
     b.className = [it.on && 'on', !it.online && 'offline', busy.has(it.id) && 'busy'].filter(Boolean).join(' ');
     b.setAttribute('aria-pressed', String(!!it.on));
-    const name = document.createElement('span');
-    name.textContent = it.name;
-    const status = document.createElement('small');
-    status.textContent = !it.online ? 'offline'
-      : it.watts != null ? `${it.watts.toFixed(1)} W`
-      : it.on ? 'ligado' : 'desligado';
-    b.append(name, status);
-    b.onclick = () => toggle(it);
+    longPress(b, () => toggle(it), () => openSheet(it.id));
     grid.append(b);
   }
+}
+
+// toque curto = onTap; segurar 500 ms = onHold (e o click que vem depois é ignorado)
+function longPress(b, onTap, onHold) {
+  let t, held = false;
+  const cancel = () => { clearTimeout(t); pressing = false; };
+  b.addEventListener('pointerdown', () => {
+    held = false; pressing = true;
+    t = setTimeout(() => { held = true; pressing = false; onHold(); }, 500);
+  });
+  ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, cancel));
+  b.addEventListener('contextmenu', e => e.preventDefault());
+  b.addEventListener('click', () => { if (!held) onTap(); });
+}
+
+function openSheet(id) {
+  sheetId = id;
+  renderSheet();
+  if (!sheet.open) sheet.showModal();
+}
+
+function renderSheet() {
+  const it = last.find(x => x.id === sheetId);
+  if (!it) return;
+  sheetName.textContent = it.name;
+  sheetBody.replaceChildren();
+  if (!it.timer_dp) {
+    sheetBody.append(el('p', {textContent: 'Este aparelho não tem timer.'}));
+    return;
+  }
+  const left = timerLeft(it);
+  const action = it.on ? 'Desligar' : 'Ligar';
+  sheetBody.append(el('p', {textContent: left
+    ? `${action} em ${Math.ceil(left / 60)} min. Trocar para:` : `${action} em:`}));
+  const chips = el('div', {className: 'chips'});
+  for (const [label, min] of [['15 min', 15], ['30 min', 30], ['1 h', 60], ['2 h', 120]]) {
+    chips.append(el('button', {textContent: label, onclick: () => setTimer(it, min * 60)}));
+  }
+  const input = el('input', {type: 'number', inputMode: 'numeric', min: 1, max: 1440, placeholder: '1–1440 min'});
+  chips.append(input, el('button', {textContent: 'OK', onclick: () => {
+    const min = parseInt(input.value, 10);
+    if (min >= 1 && min <= 1440) setTimer(it, min * 60);
+    else { input.value = ''; input.focus(); }  // o #erro fica atrás do painel; o placeholder já diz a faixa
+  }}));
+  sheetBody.append(chips);
+  if (left) {
+    sheetBody.append(el('p', {}, el('button', {className: 'danger', textContent: 'Cancelar timer',
+      onclick: () => setTimer(it, 0)})));
+  }
+}
+
+async function setTimer(it, seconds) {
+  await send(it, it.timer_dp, seconds);
+  sheet.close();
 }
 
 async function load() {
@@ -72,7 +150,7 @@ async function load() {
   }
 }
 
-async function toggle(it) {
+async function send(it, dp, value) {
   if (busy.has(it.id)) return;
   busy.add(it.id);
   render();
@@ -80,7 +158,7 @@ async function toggle(it) {
     const r = await fetch('/api/set/' + it.id, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({dp: it.dp, value: !it.on}),
+      body: JSON.stringify({dp, value}),
     });
     const body = await r.json();
     if (!r.ok) throw new Error(body.error);
@@ -92,6 +170,14 @@ async function toggle(it) {
   busy.delete(it.id);
   render();
 }
+
+const toggle = it => send(it, it.dp, !it.on);
+
+sheet.querySelector('.close').onclick = () => sheet.close();
+sheet.addEventListener('click', e => {  // toque no fundo escuro, fora do painel
+  const r = sheet.getBoundingClientRect();
+  if (e.target === sheet && (e.clientY < r.top || e.clientX < r.left || e.clientX > r.right)) sheet.close();
+});
 
 let timer;
 function start() {

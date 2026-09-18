@@ -97,8 +97,13 @@ A v1 já deixa estas portas abertas, sem implementar nada além disso:
   e o `/api/state` já entrega os DPs crus. Adicionar esses controles é
   trabalho só da página. O `mapping` do `devices.json` traz os limites
   (`bright_value_v2` 10–1000, `colour_data_v2` em HSV etc.).
-- **Timers:** os aparelhos já têm `countdown_1` / DP `26`. Isso cabe no
-  mesmo `/api/set`.
+- **Timers (feito em 2026-09-18):** usa o `countdown_1` do próprio aparelho
+  (`9` nos interruptores e tomadas, `26` nas lâmpadas; as fitas não têm).
+  Ao zerar, o aparelho inverte o estado. O `view()` expõe `timer_dp`, e o
+  `check()` passou a respeitar o min/max do `mapping`. Na página, tocar e
+  segurar um bloco abre um painel (`<dialog>`) com 15 min, 30 min, 1 h,
+  2 h, um campo de minutos e "Cancelar timer". Esse painel é onde o brilho,
+  a cor e os efeitos vão entrar.
 - **Histórico de consumo:** o poll já lê `cur_power` a cada 10 s. Gravar
   num SQLite, no mesmo padrão do `/opt/scripts/telemetria.db`, é um passo
   a mais no mesmo loop.
