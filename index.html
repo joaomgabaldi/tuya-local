@@ -6,34 +6,50 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Casa">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#f2f2f7">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="manifest" href="/manifest.json">
 <title>Casa</title>
 <style>
-  :root { color-scheme: dark; --tile: rgb(44 44 46 / .85); --tile-on: #f2f2f7; --txt: #f2f2f7;
-          --sub: rgb(235 235 245 / .6); --card: rgb(28 28 30 / .92); --chip: rgb(118 118 128 / .24);
-          --accent: #ffd60a; --ease: cubic-bezier(.2, .9, .25, 1.05); }
+  /* tema: segue o claro/escuro do iPhone. Toda cor da página sai daqui; nada de cor fixa no resto do CSS */
+  :root { color-scheme: light dark; --accent: #ffd60a; --ease: cubic-bezier(.2, .9, .25, 1.05);
+          --bg: radial-gradient(120% 60% at 50% 0%, #1f2a44 0%, #000 70%);
+          --tile: rgb(44 44 46 / .85); --tile-on: #f2f2f7; --tile-on-shadow: none; --txt: #f2f2f7;
+          --sub: rgb(235 235 245 / .6); --card: rgb(28 28 30 / .92); --card-solid: #1c1c1e; --card-shadow: none;
+          --chip: rgb(118 118 128 / .24); --track: rgb(120 120 128 / .32); --icon-off: rgb(255 255 255 / .12);
+          --line: rgb(84 84 88 / .4); --grab: rgb(255 255 255 / .3); --ring: #fff; --outline: rgb(235 235 245 / .25);
+          --danger: #ff6961; --blur: blur(18px) brightness(.55) saturate(1.3); }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: radial-gradient(120% 60% at 50% 0%, #dbe4f5 0%, #f2f2f7 70%);
+            --tile: rgb(118 118 128 / .12); --tile-on: #fff; --tile-on-shadow: 0 1px 4px rgb(0 0 0 / .12); --txt: #000;
+            --sub: rgb(60 60 67 / .6); --card: rgb(255 255 255 / .96); --card-solid: #fff; --card-shadow: 0 12px 40px rgb(0 0 0 / .18);
+            --chip: rgb(118 118 128 / .12); --track: rgb(120 120 128 / .16); --icon-off: rgb(0 0 0 / .06);
+            --line: rgb(60 60 67 / .18); --grab: rgb(0 0 0 / .2); --ring: #000; --outline: rgb(60 60 67 / .3);
+            --danger: #d70015; --blur: blur(18px) brightness(1.03) saturate(1.2); }
+  }
   * { -webkit-tap-highlight-color: transparent; }
   /* o dedo continua pressionado quando o cartão abre: sem isso o iOS seleciona tudo que está embaixo */
   html { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
   body { margin: 0; padding: 12px 16px 32px; padding-top: max(12px, env(safe-area-inset-top));
-         background: radial-gradient(120% 60% at 50% 0%, #1f2a44 0%, #000 70%) fixed; color: var(--txt);
+         background: var(--bg) fixed; color: var(--txt);
          font: 17px -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; }
   h1 { font-size: 34px; font-weight: 700; margin: 8px 0 4px; letter-spacing: -.02em; }
   h2 { font-size: 20px; font-weight: 600; margin: 22px 0 10px; }
-  .erro { color: #ff6961; font-size: 15px; min-height: 1.2em; margin: 4px 0; }
+  .erro { color: var(--danger); font-size: 15px; min-height: 1.2em; margin: 4px 0; }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
   .tile { position: relative; box-sizing: border-box; height: 72px; padding: 10px 12px; border-radius: 16px;
           background: var(--tile); display: flex; align-items: center; gap: 10px; cursor: pointer;
           touch-action: manipulation; transition: transform .18s var(--ease), background .2s; }
   .tile.pressing { transform: scale(.94); }
-  .tile.on { background: var(--tile-on); color: #000; }
+  .tile.on { background: var(--tile-on); color: #000; box-shadow: var(--tile-on-shadow); }
   .tile.on .sub { color: rgb(60 60 67 / .6); }
   .tile.offline { opacity: .45; }
   .tile.busy { opacity: .7; }
   .icon { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
-          font-size: 17px; background: rgb(255 255 255 / .12); }
+          color: var(--sub); background: var(--icon-off); }
+  svg.ico { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .tile.on .icon { background: var(--dot, var(--accent)); color: #000; }
   .tile .txt { min-width: 0; line-height: 1.2; }
   .tile .name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -45,25 +61,30 @@
   html.locked, html.locked body { overflow: hidden; }
   #overlay { position: fixed; inset: 0; touch-action: none; }
   h1, main, body > .erro { transition: filter .3s; }
-  html.blurred h1, html.blurred main, html.blurred body > .erro { filter: blur(18px) brightness(.55) saturate(1.3); }
+  html.blurred h1, html.blurred main, html.blurred body > .erro { filter: var(--blur); }
   #card { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 32px));
           height: fit-content; max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain;
-          border-radius: 28px; background: var(--card); transform-origin: 0 0; padding: 0 20px 22px; }
+          border-radius: 28px; background: var(--card); box-shadow: var(--card-shadow); transform-origin: 0 0; padding: 0 20px 22px; }
   [hidden] { display: none !important; }
   .grab { padding: 10px 0 6px; touch-action: none; cursor: grab; }
   .grab::before { content: ""; display: block; width: 36px; height: 5px; border-radius: 3px;
-                  background: rgb(255 255 255 / .3); margin: 0 auto 12px; }
+                  background: var(--grab); margin: 0 auto 12px; }
   .grab .name { font-size: 22px; font-weight: 700; }
   .grab .sub { font-size: 15px; color: var(--sub); margin-top: 2px; min-height: 1.2em; }
 
   .pill { position: relative; width: 120px; height: 300px; max-height: 42dvh; margin: 18px auto 8px;
-          border-radius: 36px; background: rgb(120 120 128 / .32); overflow: hidden; touch-action: none; cursor: ns-resize; }
+          border-radius: 36px; background: var(--track); overflow: hidden; touch-action: none; cursor: ns-resize; }
   .pill .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--fill, #fff); transition: background .25s; }
-  .pill .ico { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 26px;
+  .pill .sun { position: absolute; left: 50%; bottom: 16px; translate: -50%; color: #fff;
                mix-blend-mode: difference; pointer-events: none; }
-  .power { display: grid; place-items: center; width: 132px; height: 132px; margin: 22px auto 6px;
-           border: 0; border-radius: 50%; font: 56px/1 -apple-system, system-ui, sans-serif; cursor: pointer;
-           color: var(--sub); background: rgb(120 120 128 / .32); transition: background .2s, color .2s, transform .15s var(--ease); }
+  .power { display: grid; place-items: center; width: 120px; height: 120px; margin: 22px auto 6px; padding: 0;
+           border: 0; border-radius: 50%; cursor: pointer;
+           color: var(--sub); background: var(--track); transition: background .2s, color .2s, transform .15s var(--ease); }
+  /* tomada: ⏻ e a potência de agora lado a lado, para o cartão não ficar comprido */
+  .power-row { display: flex; align-items: center; gap: 20px; margin: 18px 0 4px; }
+  .power-row .power { width: 84px; height: 84px; margin: 0; }
+  .now .big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  .now .small { font-size: 14px; color: var(--sub); }
   .power.on { background: var(--accent); color: #000; }
   .power:active { transform: scale(.94); }
 
@@ -71,7 +92,7 @@
   .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
   .sw { width: 38px; height: 38px; border-radius: 50%; border: 0; padding: 0; background: var(--c);
         box-shadow: 0 0 0 2px transparent; transition: box-shadow .15s, transform .15s; cursor: pointer; }
-  .sw.sel { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px #fff; }
+  .sw.sel { box-shadow: 0 0 0 2px var(--card-solid), 0 0 0 4px var(--ring); }
   .sw:active { transform: scale(.9); }
   .sw.custom { background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); position: relative; overflow: hidden; }
   .sw.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
@@ -79,41 +100,45 @@
   .chips::-webkit-scrollbar { display: none; }
   .chip { flex: none; font: inherit; font-size: 15px; color: var(--txt); background: var(--chip); border: 0;
           border-radius: 999px; padding: 8px 14px; cursor: pointer; }
-  .chip.sel { background: var(--txt); color: #000; }
+  .chip.sel { background: var(--txt); color: var(--card-solid); }
   .chip:active { transform: scale(.95); }
 
   /* cenas */
   .tile.scene { justify-content: flex-start; }
-  .tile.scene.new { background: transparent; box-shadow: inset 0 0 0 1.5px rgb(235 235 245 / .25); color: var(--sub); }
+  .tile.scene.new { background: transparent; box-shadow: inset 0 0 0 1.5px var(--outline); color: var(--sub); }
   input.name-input { -webkit-user-select: text; user-select: text; box-sizing: border-box; width: 100%;
          font: inherit; font-size: 20px; color: inherit; background: var(--chip); border: 0; border-radius: 12px;
          padding: 12px 14px; margin-top: 8px; }
-  .row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid rgb(84 84 88 / .35); cursor: pointer; }
+  .row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-bottom: 1px solid var(--line); cursor: pointer; }
   .row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .muted { color: var(--sub); font-size: 15px; white-space: nowrap; }
   .row.add { color: var(--accent); border-bottom: 0; }
-  .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px rgb(235 235 245 / .35); }
+  .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--outline); }
   .actions { display: flex; justify-content: space-between; gap: 10px; margin-top: 22px; }
   .actions .primary { margin-left: auto; }
   .btn { font: inherit; border: 0; border-radius: 12px; padding: 12px 18px; background: var(--chip); color: var(--txt); cursor: pointer; }
   .btn.primary { background: var(--accent); color: #000; font-weight: 600; }
-  .btn.danger { color: #ff6961; }
+  .btn.danger { color: var(--danger); }
   .btn.link { background: none; color: var(--accent); padding: 4px 0; margin-top: 4px; }
   .btn.x { background: none; color: var(--sub); padding: 8px; }
 
-  /* histórico: série única em âmbar validado contra o cartão escuro (#b88600, L 0.48–0.67, contraste ≥ 3:1) */
+  /* histórico: série única em âmbar validado contra os dois cartões (#b88600: escuro L 0.48–0.67, claro L 0.43–0.77, contraste ≥ 3:1) */
   .hist { --chart: #b88600; }
+  .hist > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .hist > summary::-webkit-details-marker { display: none; }
+  .hist > summary::after { content: "›"; font-size: 20px; line-height: 1; transition: rotate .2s; }
+  .hist[open] > summary::after { rotate: 90deg; }
   .hist-stats { font-size: 17px; font-weight: 600; margin: 12px 0 2px; }
   .hist-readout { font-size: 14px; color: var(--sub); min-height: 1.3em; font-variant-numeric: tabular-nums; }
   svg.chart { display: block; width: 100%; height: auto; margin-top: 6px; touch-action: none; overflow: visible; }
-  svg.chart .grid { stroke: rgb(84 84 88 / .45); stroke-width: 1; }
+  svg.chart .grid { stroke: var(--line); stroke-width: 1; }
   svg.chart .tick { fill: var(--sub); font-size: 10px; font-variant-numeric: tabular-nums; }
   svg.chart .line { fill: none; stroke: var(--chart); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   svg.chart .area { fill: var(--chart); fill-opacity: .1; stroke: none; }
   svg.chart .bar { fill: var(--chart); transition: opacity .15s; }
   svg.chart .bar.dim { opacity: .35; }
   svg.chart .cross { stroke: var(--sub); stroke-width: 1; }
-  svg.chart .dot-mark { fill: var(--chart); stroke: var(--card-solid, #1c1c1e); stroke-width: 2; }
+  svg.chart .dot-mark { fill: var(--chart); stroke: var(--card-solid); stroke-width: 2; }
   .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 </style>
 </head>
@@ -165,7 +190,23 @@ function status(it) {
   if (left) parts.push(`⏱ ${Math.ceil(left / 60)} min`);
   return parts.join(' · ');
 }
-const iconOf = it => ({'Fitas LED': '〰️', 'Tomadas': '🔌'})[it.group] ?? '💡';
+// ícones de traço no estilo dos símbolos do iOS (os emojis vinham coloridos e fora do visual)
+const ICONS = {
+  bulb: ['M9 18h6', 'M10 21h4', 'M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.1v.1h5v-.1c0-.8.4-1.5 1.1-2.1A6 6 0 0 0 12 3z'],
+  strip: ['M2.5 9.5c3.2 0 3.2 5 6.3 5s3.2-5 6.4-5 3.2 5 6.3 5'],
+  plug: ['M9 3v5', 'M15 3v5', 'M6.5 8h11v3a5.5 5.5 0 0 1-11 0z', 'M12 16.5V21'],
+  power: ['M12 3.5v8', 'M6.8 6.6a7.5 7.5 0 1 0 10.4 0'],
+  sun: ['M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0', 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2',
+        'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4'],
+};
+function icon(name, size = 20) {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size);
+  s.setAttribute('class', 'ico'); s.setAttribute('aria-hidden', 'true');
+  for (const d of ICONS[name]) { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); }
+  return s;
+}
+const iconOf = it => ({'Fitas LED': 'strip', 'Tomadas': 'plug'})[it.group] ?? 'bulb';
 function showError(msg) { $('erro').textContent = $('c-erro').textContent = msg; }
 
 // ---- servidor ----
@@ -263,7 +304,7 @@ function render() {
     if (!grid || grid.dataset.group !== it.group) { grid = section(it.group); grid.dataset.group = it.group; }
     const t = tile(it.id, [it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy'],
                      it.online && (() => send(it, {[it.dp]: !it.on})), () => openDevice(it.id));
-    t.append(el('div', {className: 'icon', textContent: iconOf(it)}),
+    t.append(el('div', {className: 'icon'}, icon(iconOf(it))),
              el('div', {className: 'txt'}, el('div', {className: 'name', textContent: it.name}),
                                           el('div', {className: 'sub', textContent: status(it)})));
     t.setAttribute('aria-pressed', String(!!it.on));
@@ -416,10 +457,14 @@ function renderDevice(tg, extra = []) {
     body.append(el('div', {className: 'row-title', textContent: 'Efeitos'}), chipRow(effectsFor(it).map(([i, e]) => ({
       label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))));
   } else {
-    const b = el('button', {className: 'power' + (it.on ? ' on' : ''), textContent: '⏻', ariaLabel: 'Liga/desliga'});
+    const b = el('button', {className: 'power' + (it.on ? ' on' : ''), ariaLabel: 'Liga/desliga'}, icon('power', it.watts != null ? 34 : 46));
     b.setAttribute('aria-pressed', String(!!it.on));
     b.onclick = () => tg.apply({[it.dp]: !tg.get().on});
-    body.append(b);
+    if (it.watts != null) {  // tomada: ⏻ ao lado da potência de agora
+      body.append(el('div', {className: 'power-row'}, b, el('div', {className: 'now'},
+        el('div', {className: 'big', textContent: it.on ? `${num(it.watts, 1)} W` : '—'}),
+        el('div', {className: 'small', textContent: it.on ? 'agora' : 'desligada'}))));
+    } else body.append(b);
   }
   if (tg.timer && it.timer_dp) {
     const left = Math.ceil((it.dps[it.timer_dp] || 0) / 60);
@@ -433,7 +478,9 @@ function renderDevice(tg, extra = []) {
 
 function brightPill(tg) {
   const fill = el('div', {className: 'fill'});
-  const p = el('div', {className: 'pill'}, fill, el('div', {className: 'ico', textContent: '☀︎'}));
+  const sun = icon('sun', 28);
+  sun.classList.add('sun');
+  const p = el('div', {className: 'pill'}, fill, sun);
   const it = tg.get(), l = readLight(it);
   let pct = it.on ? l.bright : 0;
   const paint = () => { fill.style.height = pct + '%'; p.style.setProperty('--fill', colorOf(tg.get())); };
@@ -496,13 +543,22 @@ const svgEl = (tag, attrs = {}) => { const e = document.createElementNS('http://
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
 const niceMax = v => { if (!(v > 0)) return 1; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].find(m => m * p >= v) * p; };
 
+// retraída por padrão: o cabeçalho abre e fecha; o histórico só é buscado aberto.
+// O estado vive em `current`, então sobrevive aos redesenhos do cartão e zera ao fechar o cartão.
 function historySection(it) {
+  const wrap = el('details', {className: 'hist', open: !!current.histOpen});
+  wrap.append(el('summary', {className: 'row-title', textContent: 'Consumo'}));
+  wrap.addEventListener('toggle', () => {
+    if (current?.id !== it.id || wrap.open === !!current.histOpen) return;
+    current.histOpen = wrap.open;
+    redraw();
+  });
+  if (!wrap.open) return wrap;
   const range = current.range ??= '24h';
-  const wrap = el('div', {className: 'hist'});
   const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === range,
     pick: () => { current.range = k; redraw(); }})));
   const stats = el('div', {className: 'hist-stats'}), readout = el('div', {className: 'hist-readout'});
-  wrap.append(el('div', {className: 'row-title', textContent: 'Consumo'}), chips, stats, readout);
+  wrap.append(chips, stats, readout);
   fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
     if (current?.id !== it.id || current.range !== range) return;  // o cartão mudou enquanto buscava
     if (!h.points.length) { stats.textContent = 'Sem dados ainda: o histórico começa a contar agora.'; return; }

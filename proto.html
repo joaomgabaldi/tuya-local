@@ -124,6 +124,10 @@
 
   /* histórico: série única em âmbar validado contra os dois cartões (#b88600: escuro L 0.48–0.67, claro L 0.43–0.77, contraste ≥ 3:1) */
   .hist { --chart: #b88600; }
+  .hist > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .hist > summary::-webkit-details-marker { display: none; }
+  .hist > summary::after { content: "›"; font-size: 20px; line-height: 1; transition: rotate .2s; }
+  .hist[open] > summary::after { rotate: 90deg; }
   .hist-stats { font-size: 17px; font-weight: 600; margin: 12px 0 2px; }
   .hist-readout { font-size: 14px; color: var(--sub); min-height: 1.3em; font-variant-numeric: tabular-nums; }
   svg.chart { display: block; width: 100%; height: auto; margin-top: 6px; touch-action: none; overflow: visible; }
@@ -539,13 +543,22 @@ const svgEl = (tag, attrs = {}) => { const e = document.createElementNS('http://
   for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; };
 const niceMax = v => { if (!(v > 0)) return 1; const p = 10 ** Math.floor(Math.log10(v)); return [1, 2, 2.5, 5, 10].find(m => m * p >= v) * p; };
 
+// retraída por padrão: o cabeçalho abre e fecha; o histórico só é buscado aberto.
+// O estado vive em `current`, então sobrevive aos redesenhos do cartão e zera ao fechar o cartão.
 function historySection(it) {
+  const wrap = el('details', {className: 'hist', open: !!current.histOpen});
+  wrap.append(el('summary', {className: 'row-title', textContent: 'Consumo'}));
+  wrap.addEventListener('toggle', () => {
+    if (current?.id !== it.id || wrap.open === !!current.histOpen) return;
+    current.histOpen = wrap.open;
+    redraw();
+  });
+  if (!wrap.open) return wrap;
   const range = current.range ??= '24h';
-  const wrap = el('div', {className: 'hist'});
   const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === range,
     pick: () => { current.range = k; redraw(); }})));
   const stats = el('div', {className: 'hist-stats'}), readout = el('div', {className: 'hist-readout'});
-  wrap.append(el('div', {className: 'row-title', textContent: 'Consumo'}), chips, stats, readout);
+  wrap.append(chips, stats, readout);
   fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
     if (current?.id !== it.id || current.range !== range) return;  // o cartão mudou enquanto buscava
     if (!h.points.length) { stats.textContent = 'Sem dados ainda: o histórico começa a contar agora.'; return; }
