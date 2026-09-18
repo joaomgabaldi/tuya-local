@@ -7,3 +7,4 @@ snapshot.json
 __pycache__/
 scenes.json
 history.db
+raw-dps.json

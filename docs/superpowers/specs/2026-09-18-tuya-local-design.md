@@ -152,6 +152,20 @@ cada aparelho, e a página manda exatamente o texto capturado. O efeito ativo é
 reconhecido pelo **número** (2 primeiros dígitos, únicos em cada lista), porque a fita
 reescreve o valor que recebe: troca a velocidade ou devolve só um resumo `NN466401…`.
 
+## Ajustes das lâmpadas (2026-09-18)
+
+Ícone ⚙︎ "Ajustes" nas lâmpadas, com formatos capturados escutando o aparelho enquanto o
+João mexia no app:
+- **Ao voltar a energia (DP 33 `power_memory`, binário):** `[00][modo][h][s][v][brilho][temp]`,
+  2 bytes cada, com modo 0 padrão, 1 último estado e 2 personalizado. Esse DP não vem no
+  status, então `GET /api/settings/<id>` pede com `updatedps`. A página chama essa rota
+  ao abrir o cartão. "Cor atual" grava o personalizado com o que a lâmpada está fazendo.
+- **Não perturbe (DP 34, Boolean):** ligado, a lâmpada não acende sozinha quando a
+  energia volta.
+- **Gradiente (DP 35, fora do mapping, só Abajur/Spot):** `[00][acender ms][apagar ms]`,
+  3 bytes cada. Entra via `EXTRA_DPS`. O aparelho não devolve esse DP numa leitura,
+  então o último valor gravado fica em `raw-dps.json` (fora do git).
+
 ## Cenas da casa (desenho aprovado em 2026-09-18)
 
 - **Página:** seção "Cenas" no topo, com blocos só com o nome (sem ícone,

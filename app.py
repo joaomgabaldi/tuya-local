@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Página de liga/desliga dos aparelhos Tuya pela LAN (spec em docs/superpowers/specs)."""
 import sys
+import base64
+import binascii
 import json
 import mimetypes
 import sqlite3
@@ -20,13 +22,19 @@ CATEGORIES = {"tdq": ("Interruptores", "1"), "dj": ("Lâmpadas", "20"),
               "dd": ("Fitas LED", "20"), "cz": ("Tomadas", "1")}
 # efeitos de fábrica por modelo (product_id), capturados do app da Tuya: o aparelho não guarda a lista, o app sim
 EFFECTS = json.loads((DIR / "effects.json").read_text())
+# DPs que o wizard não lista, descobertos escutando o aparelho enquanto o João mexia no app (2026-09-18)
+EXTRA_DPS = {"fbjf3kre1a9grzhs": {"35": {"code": "gradient_time", "type": "Raw", "values": {}}}}  # Abajur/Spot
+# DPs binários que o aparelho não devolve numa leitura: o último valor gravado fica em disco
+WRITE_ONLY = {"35"}
+RAW_FILE = DIR / "raw-dps.json"  # dado, fora do git
 # tipo do mapping → tipo Python aceito na escrita (checado com `type() is`, então bool não passa por int)
-TYPES = {"Boolean": bool, "Integer": int, "Enum": str, "String": str, "Json": str}
+TYPES = {"Boolean": bool, "Integer": int, "Enum": str, "String": str, "Json": str, "Raw": str}
 
 
 def load(devices):
     order = list(CATEGORIES)
-    keep = [d for d in devices if d.get("category") in CATEGORIES]
+    keep = [{**d, "mapping": {**d["mapping"], **EXTRA_DPS.get(d.get("product_id"), {})}}
+            for d in devices if d.get("category") in CATEGORIES]
     return sorted(keep, key=lambda d: (order.index(d["category"]), d["name"]))
 
 
@@ -56,6 +64,11 @@ def check(d, dp, value):
         return f"DP {dp} de {d['name']} aceita de {lim.get('min')} a {lim.get('max')}"
     if m["type"] == "Enum" and isinstance(lim, dict) and value not in lim.get("range", [value]):
         return f"DP {dp} de {d['name']} aceita {', '.join(lim['range'])}"
+    if m["type"] == "Raw":
+        try:
+            base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError):
+            return f"DP {dp} de {d['name']} espera base64"
     return None
 
 
@@ -97,6 +110,38 @@ def refresh(id, fn, sent={}):
         return None
     entry["online"] = False
     return r.get("Error", "erro desconhecido") if isinstance(r, dict) else "sem resposta"
+
+
+def read_settings(id):
+    """DP 33 (estado ao voltar a energia) não vem no status: pede com updatedps e junta ao cache o que chegar.
+    A lâmpada responde um DP por mensagem; lê até ela parar. Devolve o erro ou None."""
+    dev, got = CONN[id], {}
+    with LOCK:
+        dev.set_socketPersistent(True)
+        try:
+            r = dev.updatedps([33])
+            for _ in range(30):
+                if not isinstance(r, dict) or "dps" not in r:
+                    break
+                got.update(r["dps"])
+                r = dev.receive()
+        finally:
+            dev.set_socketPersistent(False)
+            dev.close()
+    if not got:
+        return "a lâmpada não respondeu"
+    CACHE[id]["dps"] = {**CACHE[id]["dps"], **got}
+    return None
+
+
+def remember_raw(id, dps):
+    """Guarda em disco os DPs que o aparelho não devolve numa leitura (gradiente), para mostrar o valor atual."""
+    keep = {k: v for k, v in dps.items() if k in WRITE_ONLY}
+    if not keep:
+        return
+    known = json.loads(RAW_FILE.read_text()) if RAW_FILE.exists() else {}
+    known[id] = {**known.get(id, {}), **keep}
+    RAW_FILE.write_text(json.dumps(known))
 
 
 def poll():
@@ -250,6 +295,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, [view(DEVS[i], CACHE[i]) for i in DEVS])
         if path == "/api/scenes":
             return self.reply(200, load_scenes())
+        if path.startswith("/api/settings/"):  # lê o DP 33 da lâmpada (não vem no poll) e devolve o item
+            id = path.removeprefix("/api/settings/")
+            if id not in CONN:
+                return self.reply(404, {"error": "aparelho não encontrado"})
+            if err := read_settings(id):
+                return self.reply(502, {"error": err})
+            return self.reply(200, view(DEVS[id], CACHE[id]))
         if path.startswith("/api/history/"):
             id = path.removeprefix("/api/history/")
             rng = parse_qs(urlsplit(self.path).query).get("range", ["24h"])[0]
@@ -291,6 +343,7 @@ class Handler(BaseHTTPRequestHandler):
         # um comando só: trocar modo + cor em duas chamadas faria a lâmpada piscar no modo errado
         if err := refresh(id, lambda dev: dev.set_multiple_values(dps), sent=dps):
             return self.reply(502, {"error": err})
+        remember_raw(id, dps)
         self.reply(200, view(DEVS[id], CACHE[id]))
 
     def log_message(self, *args):
@@ -298,9 +351,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    known = json.loads(RAW_FILE.read_text()) if RAW_FILE.exists() else {}  # gradiente lembrado
     for d in load(json.load(open(DIR / "devices.json"))):
         DEVS[d["id"]] = d
-        CACHE[d["id"]] = {"online": False, "dps": {}}
+        CACHE[d["id"]] = {"online": False, "dps": dict(known.get(d["id"], {}))}
         if d.get("ip"):
             CONN[d["id"]] = connect(d, d["ip"], d["version"])
     threading.Thread(target=poll, daemon=True).start()
@@ -394,6 +448,31 @@ def selftest():
     assert d["unit"] == "kWh" and len(d["points"]) == 1 and abs(d["points"][0][1] - h["kwh"]) < 1e-9
     assert history("pc", "24h", now=t0 + 3 * 86400)["points"] == []  # fora da janela
     assert history("repelente", "7d", now=t0)["kwh"] == 0
+    # configurações das lâmpadas: DP 35 (gradiente) fora do mapping do wizard, valores binários em base64
+    abj = {"id": "g", "name": "Abajur", "category": "dj", "product_id": "fbjf3kre1a9grzhs", "mapping": {
+        "20": {"code": "switch_led", "type": "Boolean", "values": {}},
+        "33": {"code": "power_memory", "type": "Raw", "values": {}}}}
+    [abj] = load([abj])
+    assert abj["mapping"]["35"]["code"] == "gradient_time"      # vem do EXTRA_DPS
+    assert check(abj, "35", "AAAF3AADIA==") is None
+    assert check(abj, "35", "não é base64!")                     # binário tem que ser base64 de verdade
+    assert check(abj, "33", 5)                                  # e texto
+
+    class FakeSettings:  # a lâmpada responde ao updatedps um DP por mensagem, depois silêncio
+        def __init__(self): self.msgs = [{"dps": {"30": "AA=="}}, {"dps": {"33": "AAEAPAPoA+gD6ADc"}}, None]
+        def set_socketPersistent(self, on): pass
+        def close(self): pass
+        def updatedps(self, dps): return self.msgs.pop(0)
+        def receive(self): return self.msgs.pop(0)
+    DEVS["g"], CONN["g"], CACHE["g"] = abj, FakeSettings(), {"online": True, "dps": {"20": True}}
+    assert read_settings("g") is None
+    assert CACHE["g"]["dps"]["33"] == "AAEAPAPoA+gD6ADc" and CACHE["g"]["dps"]["20"] is True
+
+    # o DP 35 não pode ser lido de volta: o último valor gravado fica em disco e volta no próximo início
+    global RAW_FILE
+    RAW_FILE = Path(tempfile.mkdtemp()) / "raw-dps.json"
+    remember_raw("g", {"35": "AAAF3AADIA==", "20": False})
+    assert json.loads(RAW_FILE.read_text()) == {"g": {"35": "AAAF3AADIA=="}}
     print("selftest ok")
 
 

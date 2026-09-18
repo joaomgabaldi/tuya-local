@@ -66,3 +66,35 @@ export function stateDps(it) {
   const keep = {white: [d.bright, d.temp], colour: [d.colour], scene: [d.scene]}[mode] ?? [];
   return Object.fromEntries([[d.sw, true], [d.mode, mode], ...keep.filter(k => k && k in v).map(k => [k, v[k]])]);
 }
+
+// ---- configurações das lâmpadas (binárias, em base64), formatos capturados do app em 2026-09-18 ----
+const b64bytes = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+const bytesB64 = bytes => btoa(String.fromCharCode(...bytes));
+const be = (bytes, i, n) => bytes.slice(i, i + n).reduce((a, x) => a * 256 + x, 0);  // inteiro big-endian de n bytes
+const put = (v, n) => Array.from({length: n}, (_, k) => (v >> (8 * (n - 1 - k))) & 255);
+
+// DP 33 power_memory: [00][modo][h][s][v][brilho][temp], 2 bytes cada. modo: 0 padrão, 1 último estado, 2 personalizado
+const PM_MODES = ['default', 'memory', 'custom'];
+export function parsePowerMemory(b64) {
+  if (!b64) return null;
+  const b = b64bytes(b64);
+  const [h, s, v, bright, temp] = [2, 4, 6, 8, 10].map(i => be(b, i, 2));
+  return {mode: PM_MODES[b[1]] ?? 'default', h, s, v, bright, temp};
+}
+export function powerMemoryB64(mode, {h = 0, s = 0, v = 0, bright = 0, temp = 0} = {}) {
+  return bytesB64([0, PM_MODES.indexOf(mode), ...[h, s, v, bright, temp].flatMap(x => put(x, 2))]);
+}
+// "personalizado" = o que a lâmpada faz agora: branco guarda brilho/temperatura (cor zerada), cor guarda h/s/v
+export function customFromState(it) {
+  const d = dpsOf(it), v = it.dps;
+  if ((v[d.mode] ?? 'colour') === 'white') return {h: 0, s: 0, v: 0, bright: v[d.bright] ?? 1000, temp: v[d.temp] ?? 0};
+  return {...parseHsv(v[d.colour]), bright: 0, temp: 0};
+}
+
+// DP 35 (gradiente; fora do mapping do wizard, só Abajur/Spot): [00][acender ms, 3 bytes][apagar ms, 3 bytes]
+export function parseGradient(b64) {
+  if (!b64) return null;
+  const b = b64bytes(b64);
+  return {on: be(b, 1, 3), off: be(b, 4, 3)};
+}
+export const gradientB64 = (on, off) => bytesB64([0, ...put(on, 3), ...put(off, 3)]);

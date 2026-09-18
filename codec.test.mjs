@@ -1,6 +1,7 @@
 // node codec.test.mjs — testa a tradução entre os DPs crus e o que a página mostra/manda
 import assert from 'node:assert/strict';
-import {hsvHex, parseHsv, readLight, brightCmd, colourCmd, whiteCmd, effectCmd, stateDps} from './codec.js';
+import {hsvHex, parseHsv, readLight, brightCmd, colourCmd, whiteCmd, effectCmd, stateDps,
+        parsePowerMemory, powerMemoryB64, customFromState, parseGradient, gradientB64} from './codec.js';
 
 const lamp = {dp: '20', codes: {switch_led: '20', work_mode: '21', bright_value_v2: '22', temp_value_v2: '23',
   colour_data_v2: '24', scene_data_v2: '25'}};
@@ -52,5 +53,19 @@ assert.deepEqual(stateDps({...lamp, on: true, dps: {...full, '21': 'white'}}), {
 assert.deepEqual(stateDps({...strip, on: true, dps: {...full, '21': 'scene'}}), {'20': true, '21': 'scene', '25': '14bb'});
 assert.deepEqual(stateDps({...lamp, on: false, dps: {...full, '20': false}}), {'20': false});
 assert.deepEqual(stateDps({dp: '1', codes: {switch_1: '1'}, on: true, dps: {'1': true, '9': 300}}), {'1': true});
+
+// DP 33 (estado ao voltar a energia), valores reais capturados em 2026-09-18
+assert.deepEqual(parsePowerMemory('AAEAPAPoA+gD6ADc'), {mode: 'memory', h: 60, s: 1000, v: 1000, bright: 1000, temp: 220});
+assert.deepEqual(parsePowerMemory('AAIAAAAAAAAD6APo'), {mode: 'custom', h: 0, s: 0, v: 0, bright: 1000, temp: 1000});
+assert.equal(parsePowerMemory(undefined), null);
+assert.equal(powerMemoryB64('memory', {h: 60, s: 1000, v: 1000, bright: 1000, temp: 220}), 'AAEAPAPoA+gD6ADc');  // ida e volta
+assert.equal(powerMemoryB64('custom', {h: 0, s: 0, v: 0, bright: 1000, temp: 1000}), 'AAIAAAAAAAAD6APo');
+// personalizado = o que a lâmpada está fazendo agora: branco guarda brilho/temperatura, cor guarda h/s/v
+assert.deepEqual(customFromState({...lamp, on: true, dps: {'21': 'white', '22': 700, '23': 300}}), {h: 0, s: 0, v: 0, bright: 700, temp: 300});
+assert.deepEqual(customFromState({...lamp, on: true, dps: {'21': 'colour', '24': '00d7038401f4'}}), {h: 215, s: 900, v: 500, bright: 0, temp: 0});
+// DP 35 (gradiente do Abajur/Spot): acender 1,5 s e apagar 0,8 s, capturado do app
+assert.deepEqual(parseGradient('AAAF3AADIA=='), {on: 1500, off: 800});
+assert.equal(gradientB64(1500, 800), 'AAAF3AADIA==');
+assert.equal(parseGradient(undefined), null);
 
 console.log('codec ok');
