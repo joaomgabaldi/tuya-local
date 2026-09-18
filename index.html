@@ -98,9 +98,10 @@
   .tool.on { background: var(--txt); color: var(--card-solid); }
   .tool .badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
                  border-radius: 9px; background: var(--accent); color: #000; font-size: 11px; font-weight: 700; line-height: 18px; }
-  .panel { position: relative; padding-top: 10px; }
+  .panel { position: relative; }
+  .panel-inner { display: flow-root; padding-top: 10px; }
   .panel.anim { overflow: hidden; }  /* só durante a animação: fixo, cortaria a borda dos chips que rolam */
-  .panel .ghost { position: absolute; top: 10px; left: 0; right: 0; pointer-events: none; }
+  .panel .ghost { position: absolute; top: 0; left: 0; right: 0; pointer-events: none; }
   .panel-note { color: var(--sub); font-size: 15px; margin-bottom: 10px; }
   .chip { transition: background .2s, color .2s, transform .15s; }
   .pill .fill { transition: background .25s, height .3s var(--ease); }
@@ -629,7 +630,10 @@ function fillHistory(it, wrap) {
 function toolbar(tools) {
   if (!tools.some(t => t.key === current.tab)) current.tab = null;
   const panel = el('div', {className: 'panel', hidden: !current.tab});
-  if (current.tab) tools.find(t => t.key === current.tab).build(panel);
+  // o espaçamento fica num invólucro interno (flow-root): o painel que anima não tem padding nem margem vazando,
+  // então a altura medida, a animada e a final são o mesmo número (com padding no painel ele passava 10 px e voltava)
+  const fill = key => { const inner = el('div', {className: 'panel-inner'}); tools.find(t => t.key === key).build(inner); panel.append(inner); };
+  if (current.tab) fill(current.tab);
   const btns = tools.map(t => {
     const b = el('button', {className: 'tool' + (t.key === current.tab ? ' on' : ''), ariaLabel: t.label}, icon(t.icon, 22));
     b.setAttribute('aria-pressed', String(t.key === current.tab));
@@ -647,7 +651,7 @@ function toolbar(tools) {
     panel.classList.add('anim');
     panel.hidden = false;
     panel.replaceChildren();
-    if (next) tools.find(t => t.key === next).build(panel);
+    if (next) fill(next);
     const fresh = [...panel.children];
     const to = next ? panel.scrollHeight : 0;  // medido antes de o conteúdo antigo voltar como fantasma
     if (old.length) {
