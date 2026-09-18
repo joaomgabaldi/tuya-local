@@ -1,0 +1,15 @@
+[Unit]
+Description=Tuya local: página de liga/desliga pela LAN
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=joao
+WorkingDirectory=/home/joao/homelab/tuya-local
+ExecStart=/home/joao/homelab/tuya-local/.venv/bin/python app.py
+# no boot o 192.168.0.2 pode ainda não existir; o bind falha e o systemd tenta de novo
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
