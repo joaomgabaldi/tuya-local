@@ -56,10 +56,13 @@
           border-radius: 36px; background: rgb(120 120 128 / .32); overflow: hidden; touch-action: none; cursor: ns-resize; }
   .pill .fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--fill, #fff);
                 transition: background .25s; }
-  .pill.dragging .fill { transition: background .25s; }
   .pill .ico { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 26px;
                mix-blend-mode: difference; pointer-events: none; }
-  .pill.toggle .fill { transition: height .25s var(--ease), background .25s; }
+  .power { display: grid; place-items: center; width: 132px; height: 132px; margin: 22px auto 6px;
+           border: 0; border-radius: 50%; font: 56px/1 -apple-system, system-ui, sans-serif; cursor: pointer;
+           color: var(--sub); background: rgb(120 120 128 / .32); transition: background .2s, color .2s, transform .15s var(--ease); }
+  .power.on { background: var(--accent); color: #000; }
+  .power:active { transform: scale(.94); }
 
   .row-title { font-size: 13px; color: var(--sub); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
   .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -181,8 +184,11 @@ function openCard(d) {
   $('overlay').hidden = $('card').hidden = false;
   lockScroll(true);
   const from = d.tile.getBoundingClientRect();
-  $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
-                    {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
+  const grow = $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
+                                 {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
+  // o bloco some só enquanto "vira" o cartão; parado, ele volta desfocado atrás. Escondido o tempo todo,
+  // o buraco mostrava o fundo preto do fim da página (o "quadrado preto").
+  grow.onfinish = () => { if (current === d) d.tile.style.visibility = ''; };  // fechou antes de terminar: não reaparece
   for (const part of contentParts())
     part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
   $('overlay').animate([{opacity: 0}, {opacity: 1}], {duration: 300});
@@ -251,7 +257,7 @@ function renderCard() {
     body.append(el('div', {className: 'row-title', textContent: 'Efeitos'}), chipRow(EFFECTS.map((name, i) => ({
       label: name, sel: d.mode === 'scene' && d.scene === i, pick: () => Object.assign(d, {mode: 'scene', scene: i, on: true})}))));
   } else {
-    body.append(togglePill(d, refresh));
+    body.append(powerButton(d, refresh));
   }
   if (d.kind !== 'strip') {
     const label = d.timer ? `${d.on ? 'Desliga' : 'Liga'} em ${d.timer} min` : (d.on ? 'Desligar em' : 'Ligar em');
@@ -287,13 +293,11 @@ function brightPill(d, refresh) {
   return p;
 }
 
-function togglePill(d, refresh) {
-  const fill = el('div', {className: 'fill'});
-  const p = el('div', {className: 'pill toggle'}, fill, el('div', {className: 'ico', textContent: d.kind === 'plug' ? '🔌' : '⏻'}));
-  const paint = () => { fill.style.height = d.on ? '100%' : '0%'; p.style.setProperty('--fill', 'var(--accent)'); };
-  paint();
-  p.addEventListener('click', () => { d.on = !d.on; paint(); refresh(); if (current) renderCard(); });
-  return p;
+function powerButton(d, refresh) {
+  const b = el('button', {className: 'power' + (d.on ? ' on' : ''), textContent: '⏻', ariaLabel: 'Liga/desliga'});
+  b.setAttribute('aria-pressed', String(d.on));
+  b.addEventListener('click', () => { d.on = !d.on; refresh(); renderCard(); });
+  return b;
 }
 
 function swatchRow(items, d, custom) {
