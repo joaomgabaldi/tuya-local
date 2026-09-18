@@ -77,13 +77,15 @@ def connect(d, ip, version):
     return dev
 
 
-def refresh(id, fn):
-    """Roda fn(device) sob o lock e junta os DPs da resposta ao cache. Devolve a mensagem de erro ou None."""
+def refresh(id, fn, sent={}):
+    """Roda fn(device) sob o lock e junta ao cache o que foi enviado (`sent`) e, por cima, o que o aparelho
+    respondeu. As lâmpadas v3.4/v3.5 às vezes só confirmam parte dos DPs de um comando aceito; sem o `sent`
+    o cache ficava com o valor antigo e o comando seguinte saía com dado velho. Devolve o erro ou None."""
     with LOCK:
         r = fn(CONN[id])
     entry = CACHE[id]
     if isinstance(r, dict) and "dps" in r:
-        entry["dps"] = {**entry["dps"], **r["dps"]}  # troca o dict inteiro: quem está serializando não vê ele mudar
+        entry["dps"] = {**entry["dps"], **sent, **r["dps"]}  # troca o dict inteiro: quem serializa não vê ele mudar
         entry["online"] = True
         return None
     entry["online"] = False
@@ -146,7 +148,7 @@ class Handler(BaseHTTPRequestHandler):
         if id not in CONN:
             return self.reply(502, {"error": "aparelho ainda não achado na rede"})
         # um comando só: trocar modo + cor em duas chamadas faria a lâmpada piscar no modo errado
-        if err := refresh(id, lambda dev: dev.set_multiple_values(dps)):
+        if err := refresh(id, lambda dev: dev.set_multiple_values(dps), sent=dps):
             return self.reply(502, {"error": err})
         self.reply(200, view(DEVS[id], CACHE[id]))
 
@@ -204,6 +206,13 @@ def selftest():
     assert check_dps(abajur, {"20": True, "21": "disco"})  # um valor ruim recusa o comando inteiro
     assert check_dps(abajur, {})
     assert check_dps(abajur, ["20", True])
+    # resposta parcial do aparelho: o que foi enviado entra no cache; o que o aparelho respondeu vale por cima
+    class Fake:
+        def set_multiple_values(self, dps):
+            return {"dps": {"20": True}}  # v3.4/v3.5 às vezes só confirma parte do que recebeu
+    DEVS["c"], CONN["c"], CACHE["c"] = abajur, Fake(), {"online": True, "dps": {"20": False, "24": "velho"}}
+    assert refresh("c", lambda dev: dev.set_multiple_values({"20": True, "24": "novo"}), sent={"20": True, "24": "novo"}) is None
+    assert CACHE["c"]["dps"] == {"20": True, "24": "novo"}
     print("selftest ok")
 
 
