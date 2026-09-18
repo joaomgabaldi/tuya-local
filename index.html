@@ -89,16 +89,31 @@
   /* afunda rápido ao tocar e volta com um pouco de mola ao soltar */
   .power { transition: background .2s, color .2s, transform .45s cubic-bezier(.3, 1.8, .5, 1); }
   .power:active { transform: scale(.86); transition: background .2s, color .2s, transform .08s ease-out; }
-  .disc { border-top: 1px solid var(--line); margin-top: 16px; }
-  .disc + .disc { margin-top: 0; }
-  .disc-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 0; border: 0; background: none;
-               font: inherit; color: var(--txt); cursor: pointer; text-align: left; }
-  .disc-head > span:first-child { flex: 1; }
-  .disc-detail { color: var(--sub); }
-  .disc-head svg { color: var(--sub); transition: rotate .25s var(--ease); }
-  .disc-head.open svg { rotate: 90deg; }
-  .disc-body.anim { overflow: hidden; }  /* só durante a animação: fixo, cortaria a borda dos chips que rolam */
-  .disc-body > :last-child { margin-bottom: 14px; }
+  /* barra de ícones + painel que expande */
+  .tools { display: flex; justify-content: center; gap: 14px; margin: 18px 0 4px; }
+  .tool { position: relative; display: grid; place-items: center; width: 52px; height: 52px; padding: 0; border: 0;
+          border-radius: 50%; background: var(--chip); color: var(--txt); cursor: pointer;
+          transition: background .25s, color .25s, transform .45s cubic-bezier(.3, 1.8, .5, 1); }
+  .tool:active { transform: scale(.88); transition: background .25s, color .25s, transform .08s ease-out; }
+  .tool.on { background: var(--txt); color: var(--card-solid); }
+  .tool .badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+                 border-radius: 9px; background: var(--accent); color: #000; font-size: 11px; font-weight: 700; line-height: 18px; }
+  .panel { position: relative; padding-top: 10px; }
+  .panel.anim { overflow: hidden; }  /* só durante a animação: fixo, cortaria a borda dos chips que rolam */
+  .panel .ghost { position: absolute; top: 10px; left: 0; right: 0; pointer-events: none; }
+  .panel-note { color: var(--sub); font-size: 15px; margin-bottom: 10px; }
+  .chip { transition: background .2s, color .2s, transform .15s; }
+  .pill .fill { transition: background .25s, height .3s var(--ease); }
+  .pill.dragging .fill { transition: background .25s; }
+  .sw { transition: box-shadow .2s, transform .15s; }
+  .tile.turned-on { animation: tile-on .35s var(--ease); }
+  .tile.turned-off { animation: tile-off .35s var(--ease); }
+  @keyframes tile-on { from { background: var(--tile); color: var(--txt); } }
+  @keyframes tile-off { from { background: var(--tile-on); color: #000; } }
+  .tile.turned-on .icon { animation: icon-on .35s var(--ease); }
+  .tile.turned-off .icon { animation: icon-off .35s var(--ease); }
+  @keyframes icon-on { from { background: var(--icon-off); color: var(--sub); } }
+  @keyframes icon-off { from { background: var(--dot, var(--accent)); color: #000; } }
   .hist-plot { aspect-ratio: 340 / 150; margin-top: 6px; }
   .hist-plot svg.chart { margin-top: 0; }
 
@@ -206,7 +221,9 @@ const ICONS = {
   strip: ['M2.5 9.5c3.2 0 3.2 5 6.3 5s3.2-5 6.4-5 3.2 5 6.3 5'],
   plug: ['M9 3v5', 'M15 3v5', 'M6.5 8h11v3a5.5 5.5 0 0 1-11 0z', 'M12 16.5V21'],
   power: ['M12 3.5v8', 'M6.8 6.6a7.5 7.5 0 1 0 10.4 0'],
-  chev: ['M9 5l7 7-7 7'],
+  sparkles: ['M11 3.5l1.6 4.4 4.4 1.6-4.4 1.6L11 15.5l-1.6-4.4L5 9.5l4.4-1.6z', 'M18 14l.8 2.2 2.2.8-2.2.8L18 20l-.8-2.2-2.2-.8 2.2-.8z'],
+  timer: ['M19.5 13.5a7.5 7.5 0 1 1-15 0a7.5 7.5 0 1 1 15 0', 'M12 13.5V10', 'M9.5 2.5h5', 'M12 2.5V6'],
+  bolt: ['M13.5 2.5L5.5 13.5h6l-1 8 8-11h-6z'],
   sun: ['M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0', 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2',
         'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4'],
 };
@@ -240,6 +257,8 @@ async function loadScenes() {
 // na próxima, 250 ms depois. Arrastar a pílula manda dezenas de eventos por segundo e a lâmpada não aguenta.
 const outbox = new Map();  // id → {dps, done: [callbacks]}
 function send(it, dps, done) {
+  // otimista: o estado muda na hora; a resposta do aparelho confirma (ou o poll corrige) depois
+  last = last.map(x => x.id === it.id ? {...x, dps: {...x.dps, ...dps}, on: x.dp in dps ? dps[x.dp] : x.on} : x);
   const box = outbox.get(it.id);
   if (box) { Object.assign(box.dps, dps); if (done) box.done.push(done); return; }
   outbox.set(it.id, {dps: {...dps}, done: done ? [done] : []});
@@ -260,6 +279,7 @@ async function flush(id) {
       showError('');
     } catch (e) {
       showError(`${byId(id).name}: ${e.message}`);
+      load();  // desfaz o otimista com o estado de verdade
     }
     if (Object.keys(box.dps).length) await new Promise(ok => setTimeout(ok, 250));
   }
@@ -294,6 +314,7 @@ function tile(key, cls, onTap, onHold) {
   if (onTap) longPress(t, onTap, onHold);
   return t;
 }
+const prevOn = new Map();  // estado do último desenho de cada bloco, para animar só o que mudou
 function render() {
   if (pressing) return;  // re-render no meio do toque e segure perderia o gesto
   $('app').replaceChildren();
@@ -313,7 +334,10 @@ function render() {
   let grid;
   for (const it of last) {
     if (!grid || grid.dataset.group !== it.group) { grid = section(it.group); grid.dataset.group = it.group; }
-    const t = tile(it.id, [it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy'],
+    const was = prevOn.get(it.id);
+    prevOn.set(it.id, it.on);
+    const turned = was !== undefined && was !== it.on && (it.on ? 'turned-on' : 'turned-off');
+    const t = tile(it.id, [it.on && 'on', !it.online && 'offline', outbox.has(it.id) && 'busy', turned],
                      it.online && (() => send(it, {[it.dp]: !it.on})), () => openDevice(it.id));
     t.append(el('div', {className: 'icon'}, icon(iconOf(it))),
              el('div', {className: 'txt'}, el('div', {className: 'name', textContent: it.name}),
@@ -335,12 +359,12 @@ function longPress(t, onTap, onHold) {
   t.addEventListener('pointerdown', e => {
     held = false; x0 = e.clientX; y0 = e.clientY; pressing = true;
     t.classList.add('pressing');
-    timer = setTimeout(() => { held = true; cancel(); haptic(); onHold(); }, 500);
+    timer = setTimeout(() => { held = true; cancel(); onHold(); }, 500);
   });
   t.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - x0, e.clientY - y0) > 10) cancel(); });
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => t.addEventListener(ev, cancel));
   t.addEventListener('contextmenu', e => e.preventDefault());
-  t.addEventListener('click', () => { if (!held) { haptic(); onTap(); } });
+  t.addEventListener('click', () => { if (!held) { onTap(); } });
 }
 
 // ---- cartão expandido (FLIP: nasce do retângulo do bloco) ----
@@ -452,7 +476,7 @@ function renderDevice(tg, extra = []) {
   const it = tg.get();
   $('c-name').textContent = it.name;
   $('c-sub').textContent = status(it);
-  const body = $('c-body');
+  const body = $('c-body'), tools = [];
   body.append(...extra);
   if (isLight(it)) {
     const l = readLight(it);
@@ -463,14 +487,13 @@ function renderDevice(tg, extra = []) {
     body.append(el('div', {className: 'row-title', textContent: 'Cores'}), swatchRow(
       COLORS.map(([h, s]) => ({c: `hsl(${h} ${s / 10}% 58%)`, sel: l.mode === 'colour' && l.h === h && l.s === s,
                                pick: () => tg.apply(colourCmd(tg.get(), h, s))})), tg, whites));
-    body.append(disclosure('fx', 'Efeitos', l.mode === 'scene' && it.on ? EFFECTS[l.scene]?.name : '', box =>
-      box.append(chipRow(effectsFor(it).map(([i, e]) => ({
-        label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))))));
+    tools.push({key: 'fx', icon: 'sparkles', label: 'Efeitos', badge: l.mode === 'scene' && it.on ? '•' : '',
+      build: box => box.append(chipRow(effectsFor(it).map(([i, e]) => ({
+        label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))))});
   } else {
     const b = el('button', {className: 'power' + (it.on ? ' on' : ''), ariaLabel: 'Liga/desliga'}, icon('power', it.watts != null ? 34 : 46));
     b.setAttribute('aria-pressed', String(!!it.on));
     b.onclick = () => {
-      haptic();
       b.classList.toggle('on');  // muda na hora; a resposta do aparelho confirma no redesenho
       tg.apply({[it.dp]: !tg.get().on});
     };
@@ -484,9 +507,14 @@ function renderDevice(tg, extra = []) {
     const left = Math.ceil((it.dps[it.timer_dp] || 0) / 60);
     const opts = TIMERS.map(m => ({label: m < 60 ? `${m} min` : `${m / 60} h`, pick: () => tg.apply({[it.timer_dp]: m * 60})}));
     if (left) opts.push({label: 'Cancelar', pick: () => tg.apply({[it.timer_dp]: 0})});
-    body.append(disclosure('timer', it.on ? 'Desligar em' : 'Ligar em', left ? `${left} min` : '', box => box.append(chipRow(opts))));
+    tools.push({key: 'timer', icon: 'timer', label: 'Timer', badge: left ? String(left) : '', build: box => {
+      if (left) box.append(el('div', {className: 'panel-note', textContent: `${it.on ? 'Desliga' : 'Liga'} em ${left} min`}));
+      box.append(chipRow(opts));
+    }});
   }
-  if (tg.timer && it.watts != null) body.append(historySection(it));  // tomadas: só no cartão real, não no editor de cena
+  // consumo: tomadas, só no cartão real (não no editor de cena)
+  if (tg.timer && it.watts != null) tools.push({key: 'hist', icon: 'bolt', label: 'Consumo', build: box => fillHistory(it, box)});
+  if (tools.length) body.append(toolbar(tools));
 }
 
 function brightPill(tg) {
@@ -505,14 +533,16 @@ function brightPill(tg) {
     const dv = (y0 - e.clientY) / p.clientHeight * 100;
     if (Math.abs(dv) > 1) moved = true;
     if (!moved) return;
+    p.classList.add('dragging');
     pct = Math.round(clamp(v0 + dv, 0, 100));
     tg.drag(brightCmd(tg.get(), pct));
     paint();
     $('c-sub').textContent = pct ? `${pct}%` : '';
   });
   p.addEventListener('pointerup', () => {
-    if (y0 !== null && !moved) { haptic(); tg.apply({[it.dp]: !tg.get().on}); }  // toque sem arrastar = liga/desliga
+    if (y0 !== null && !moved) { tg.apply({[it.dp]: !tg.get().on}); }  // toque sem arrastar = liga/desliga
     else if (y0 !== null) tg.dragEnd();
+    p.classList.remove('dragging');
     y0 = null;
   });
   return p;
@@ -521,7 +551,12 @@ function brightPill(tg) {
 function swatchRow(items, tg, after = []) {
   const row = el('div', {className: 'swatches'});
   const add = s => {
-    const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: () => { haptic(); s.pick(); }});
+    const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: () => {
+      $('card').querySelectorAll('.sw.sel').forEach(x => x.classList.remove('sel'));
+      b.classList.add('sel');
+      $('card').querySelector('.pill')?.style.setProperty('--fill', s.c);  // a pílula já troca de cor, com transição
+      s.pick();
+    }});
     b.style.setProperty('--c', s.c);
     row.append(b);
   };
@@ -547,8 +582,13 @@ function swatchRow(items, tg, after = []) {
 
 function chipRow(items) {
   const row = el('div', {className: 'chips'});
-  for (const c of items) row.append(el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label,
-                                                 onclick: () => { haptic(); c.pick(); }}));
+  for (const c of items) {
+    const b = el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label, onclick: () => {
+      if ('sel' in c) { row.querySelectorAll('.chip.sel').forEach(x => x.classList.remove('sel')); b.classList.add('sel'); }
+      c.pick();
+    }});
+    row.append(b);
+  }
   return row;
 }
 
@@ -561,56 +601,70 @@ const niceMax = v => { if (!(v > 0)) return 1; const p = 10 ** Math.floor(Math.l
 
 // retraída por padrão: o cabeçalho abre e fecha; o histórico só é buscado aberto.
 // O estado vive em `current`, então sobrevive aos redesenhos do cartão e zera ao fechar o cartão.
-function historySection(it) {
-  return disclosure('hist', 'Consumo', '', box => fillHistory(it, box));
-}
 function fillHistory(it, wrap) {
-  wrap.classList.add('hist');
-  const range = current.range ??= '24h';
-  const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === range,
-    pick: () => { current.range = k; redraw(); }})));
+  const box = el('div', {className: 'hist'});
   const stats = el('div', {className: 'hist-stats', textContent: ' '}), readout = el('div', {className: 'hist-readout'});
   const plot = el('div', {className: 'hist-plot'});  // altura do gráfico reservada antes de o dado chegar
-  wrap.append(chips, stats, readout, plot);
-  fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
-    if (current?.id !== it.id || current.range !== range) return;  // o cartão mudou enquanto buscava
-    if (!h.points.length) { stats.textContent = 'Sem dados ainda: o histórico começa a contar agora.'; return; }
-    stats.textContent = `${num(h.kwh, 2)} kWh · média ${num(h.avg_w, 0)} W`;
-    plot.append(h.unit === 'kWh' ? dayBars(h, readout) : powerArea(h, readout), dataTable(h));
-  }).catch(() => { stats.textContent = 'Não consegui carregar o histórico.'; });
+  // trocar o período troca só o gráfico, em fade; o cartão não é redesenhado
+  const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === (current.range ??= '24h'),
+    pick: () => { current.range = k; show(k); }})));
+  box.append(chips, stats, readout, plot);
+  wrap.append(box);
+  function show(range) {
+    fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
+      if (current?.id !== it.id || current.range !== range) return;  // o cartão ou o período mudou enquanto buscava
+      stats.textContent = h.points.length ? `${num(h.kwh, 2)} kWh · média ${num(h.avg_w, 0)} W`
+                                          : 'Sem dados ainda: o histórico começa a contar agora.';
+      readout.textContent = '';
+      plot.replaceChildren(...(h.points.length ? [h.unit === 'kWh' ? dayBars(h, readout) : powerArea(h, readout), dataTable(h)] : []));
+      for (const e of [plot, stats]) e.animate([{opacity: 0}, {opacity: 1}], {duration: 220, easing: 'ease-out'});
+    }).catch(() => { stats.textContent = 'Não consegui carregar o histórico.'; });
+  }
+  show(current.range);
 }
 
-// linha retrátil (Efeitos, Desligar em, Consumo): o cabeçalho mostra o estado; tocar abre/fecha animando a altura.
-// O conteúdo só é montado na primeira abertura; o que está aberto fica em current.open e sobrevive aos redesenhos.
-function disclosure(key, title, detail, build) {
-  const open = !!current.open?.has(key);
-  const head = el('button', {className: 'disc-head' + (open ? ' open' : '')},
-    el('span', {textContent: title}), el('span', {className: 'disc-detail', textContent: detail || ''}), icon('chev', 16));
-  head.setAttribute('aria-expanded', String(open));
-  const box = el('div', {className: 'disc-body', hidden: !open});
-  let built = open;
-  if (open) build(box);
-  head.onclick = () => {
-    haptic();
-    const opening = box.hidden;
-    (current.open ??= new Set())[opening ? 'add' : 'delete'](key);
-    head.classList.toggle('open', opening);
-    head.setAttribute('aria-expanded', String(opening));
-    if (opening) {
-      if (!built) { build(box); built = true; }
-      box.hidden = false;
-      box.classList.add('anim');
-      box.animate([{height: '0px', opacity: 0}, {height: box.scrollHeight + 'px', opacity: 1}],
-                  {duration: 320, easing: 'cubic-bezier(.2, .9, .25, 1)'}).onfinish = () => { box.classList.remove('anim'); lockScroll(true); };
-    } else {
-      box.classList.add('anim');
-      box.animate([{height: box.scrollHeight + 'px', opacity: 1}, {height: '0px', opacity: 0}],
-                  {duration: 240, easing: 'cubic-bezier(.3, 0, .2, 1)'}).onfinish = () => {
-        box.hidden = true; box.classList.remove('anim'); lockScroll(true);
-      };
+// barra de ícones do cartão (Efeitos, Timer, Consumo): tocar num ícone expande o painel com aquilo; tocar em
+// outro troca o conteúdo (o antigo sai em fade por cima, o novo entra, a altura acompanha); tocar no ativo recolhe.
+// O ícone aberto fica em current.tab e sobrevive aos redesenhos do cartão (sem animar de novo).
+function toolbar(tools) {
+  if (!tools.some(t => t.key === current.tab)) current.tab = null;
+  const panel = el('div', {className: 'panel', hidden: !current.tab});
+  if (current.tab) tools.find(t => t.key === current.tab).build(panel);
+  const btns = tools.map(t => {
+    const b = el('button', {className: 'tool' + (t.key === current.tab ? ' on' : ''), ariaLabel: t.label}, icon(t.icon, 22));
+    b.setAttribute('aria-pressed', String(t.key === current.tab));
+    if (t.badge) b.append(el('span', {className: 'badge', textContent: t.badge}));
+    b.onclick = () => select(t.key);
+    return b;
+  });
+  function select(key) {
+    const next = current.tab === key ? null : key;
+    current.tab = next;
+    tools.forEach((t, i) => { btns[i].classList.toggle('on', t.key === next); btns[i].setAttribute('aria-pressed', String(t.key === next)); });
+    const from = panel.hidden ? 0 : panel.offsetHeight;
+    const old = [...panel.children];
+    panel.getAnimations().forEach(a => a.cancel());
+    panel.classList.add('anim');
+    panel.hidden = false;
+    panel.replaceChildren();
+    if (next) tools.find(t => t.key === next).build(panel);
+    const fresh = [...panel.children];
+    const to = next ? panel.scrollHeight : 0;  // medido antes de o conteúdo antigo voltar como fantasma
+    if (old.length) {
+      const ghost = el('div', {className: 'ghost'}, ...old);
+      panel.append(ghost);
+      ghost.animate([{opacity: 1}, {opacity: 0}], {duration: 140, fill: 'forwards'}).onfinish = () => ghost.remove();
     }
-  };
-  return el('div', {className: 'disc'}, head, box);
+    for (const c of fresh) c.animate([{opacity: 0, transform: 'translateY(6px)'}, {opacity: 1, transform: 'none'}],
+                                     {duration: 240, delay: old.length ? 100 : 60, easing: 'ease-out', fill: 'backwards'});
+    panel.animate([{height: from + 'px'}, {height: to + 'px'}], {duration: 320, easing: 'cubic-bezier(.2, .9, .25, 1)'}).onfinish = () => {
+      panel.classList.remove('anim');
+      if (!current || current.tab !== next) return;
+      if (!next) panel.hidden = true;
+      lockScroll(true);
+    };
+  }
+  return el('div', {className: 'toolwrap'}, el('div', {className: 'tools'}, ...btns), panel);
 }
 
 // geometria comum: 340×150 no viewBox, escala uniforme com o cartão
@@ -808,13 +862,6 @@ async function saveScenes(next) {
     return false;
   }
 }
-
-// toque háptico: o Safari do iOS não implementa navigator.vibrate; a partir do iOS 18, alternar um
-// <input type=checkbox switch> dá o toque do sistema. Onde nenhum dos dois existe, não faz nada.
-const hapticLabel = el('label', {className: 'sr-only', ariaHidden: 'true'}, el('input', {type: 'checkbox'}));
-hapticLabel.firstChild.setAttribute('switch', '');
-document.body.append(hapticLabel);
-function haptic() { if (navigator.vibrate) navigator.vibrate(8); else hapticLabel.click(); }
 
 // sem um ouvinte de touchstart o Safari do iOS não aplica :active, e nenhum botão "afunda" ao toque
 document.addEventListener('touchstart', () => {}, {passive: true});
