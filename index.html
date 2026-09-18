@@ -86,7 +86,21 @@
   .now .big { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
   .now .small { font-size: 14px; color: var(--sub); }
   .power.on { background: var(--accent); color: #000; }
-  .power:active { transform: scale(.94); }
+  /* afunda rápido ao tocar e volta com um pouco de mola ao soltar */
+  .power { transition: background .2s, color .2s, transform .45s cubic-bezier(.3, 1.8, .5, 1); }
+  .power:active { transform: scale(.86); transition: background .2s, color .2s, transform .08s ease-out; }
+  .disc { border-top: 1px solid var(--line); margin-top: 16px; }
+  .disc + .disc { margin-top: 0; }
+  .disc-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 0; border: 0; background: none;
+               font: inherit; color: var(--txt); cursor: pointer; text-align: left; }
+  .disc-head > span:first-child { flex: 1; }
+  .disc-detail { color: var(--sub); }
+  .disc-head svg { color: var(--sub); transition: rotate .25s var(--ease); }
+  .disc-head.open svg { rotate: 90deg; }
+  .disc-body.anim { overflow: hidden; }  /* só durante a animação: fixo, cortaria a borda dos chips que rolam */
+  .disc-body > :last-child { margin-bottom: 14px; }
+  .hist-plot { aspect-ratio: 340 / 150; margin-top: 6px; }
+  .hist-plot svg.chart { margin-top: 0; }
 
   .row-title { font-size: 13px; color: var(--sub); text-transform: uppercase; letter-spacing: .04em; margin: 18px 0 8px; }
   .swatches { display: flex; gap: 10px; flex-wrap: wrap; }
@@ -124,10 +138,6 @@
 
   /* histórico: série única em âmbar validado contra os dois cartões (#b88600: escuro L 0.48–0.67, claro L 0.43–0.77, contraste ≥ 3:1) */
   .hist { --chart: #b88600; }
-  .hist > summary { list-style: none; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
-  .hist > summary::-webkit-details-marker { display: none; }
-  .hist > summary::after { content: "›"; font-size: 20px; line-height: 1; transition: rotate .2s; }
-  .hist[open] > summary::after { rotate: 90deg; }
   .hist-stats { font-size: 17px; font-weight: 600; margin: 12px 0 2px; }
   .hist-readout { font-size: 14px; color: var(--sub); min-height: 1.3em; font-variant-numeric: tabular-nums; }
   svg.chart { display: block; width: 100%; height: auto; margin-top: 6px; touch-action: none; overflow: visible; }
@@ -196,6 +206,7 @@ const ICONS = {
   strip: ['M2.5 9.5c3.2 0 3.2 5 6.3 5s3.2-5 6.4-5 3.2 5 6.3 5'],
   plug: ['M9 3v5', 'M15 3v5', 'M6.5 8h11v3a5.5 5.5 0 0 1-11 0z', 'M12 16.5V21'],
   power: ['M12 3.5v8', 'M6.8 6.6a7.5 7.5 0 1 0 10.4 0'],
+  chev: ['M9 5l7 7-7 7'],
   sun: ['M16 12a4 4 0 1 1-8 0a4 4 0 1 1 8 0', 'M12 2.5v2', 'M12 19.5v2', 'M2.5 12h2', 'M19.5 12h2',
         'M5.3 5.3l1.4 1.4', 'M17.3 17.3l1.4 1.4', 'M5.3 18.7l1.4-1.4', 'M17.3 6.7l1.4-1.4'],
 };
@@ -324,12 +335,12 @@ function longPress(t, onTap, onHold) {
   t.addEventListener('pointerdown', e => {
     held = false; x0 = e.clientX; y0 = e.clientY; pressing = true;
     t.classList.add('pressing');
-    timer = setTimeout(() => { held = true; cancel(); onHold(); }, 500);
+    timer = setTimeout(() => { held = true; cancel(); haptic(); onHold(); }, 500);
   });
   t.addEventListener('pointermove', e => { if (Math.hypot(e.clientX - x0, e.clientY - y0) > 10) cancel(); });
   ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev => t.addEventListener(ev, cancel));
   t.addEventListener('contextmenu', e => e.preventDefault());
-  t.addEventListener('click', () => { if (!held) onTap(); });
+  t.addEventListener('click', () => { if (!held) { haptic(); onTap(); } });
 }
 
 // ---- cartão expandido (FLIP: nasce do retângulo do bloco) ----
@@ -446,20 +457,23 @@ function renderDevice(tg, extra = []) {
   if (isLight(it)) {
     const l = readLight(it);
     body.append(brightPill(tg));
+    // uma fileira só: cores, o seletor livre e, depois dele, os brancos (só lâmpada tem branco regulável)
+    const whites = it.codes.temp_value_v2 ? WHITES.map(([temp, c]) => ({c, sel: l.mode === 'white' && Math.abs(l.temp - temp) <= 5,
+                                                                      pick: () => tg.apply(whiteCmd(tg.get(), temp))})) : [];
     body.append(el('div', {className: 'row-title', textContent: 'Cores'}), swatchRow(
       COLORS.map(([h, s]) => ({c: `hsl(${h} ${s / 10}% 58%)`, sel: l.mode === 'colour' && l.h === h && l.s === s,
-                               pick: () => tg.apply(colourCmd(tg.get(), h, s))})), tg));
-    if (it.codes.temp_value_v2) {
-      body.append(el('div', {className: 'row-title', textContent: 'Branco'}), swatchRow(
-        WHITES.map(([temp, c]) => ({c, sel: l.mode === 'white' && Math.abs(l.temp - temp) <= 5,
-                                    pick: () => tg.apply(whiteCmd(tg.get(), temp))}))));
-    }
-    body.append(el('div', {className: 'row-title', textContent: 'Efeitos'}), chipRow(effectsFor(it).map(([i, e]) => ({
-      label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))));
+                               pick: () => tg.apply(colourCmd(tg.get(), h, s))})), tg, whites));
+    body.append(disclosure('fx', 'Efeitos', l.mode === 'scene' && it.on ? EFFECTS[l.scene]?.name : '', box =>
+      box.append(chipRow(effectsFor(it).map(([i, e]) => ({
+        label: e.name, sel: l.mode === 'scene' && l.scene === i, pick: () => tg.apply(effectCmd(tg.get(), i))}))))));
   } else {
     const b = el('button', {className: 'power' + (it.on ? ' on' : ''), ariaLabel: 'Liga/desliga'}, icon('power', it.watts != null ? 34 : 46));
     b.setAttribute('aria-pressed', String(!!it.on));
-    b.onclick = () => tg.apply({[it.dp]: !tg.get().on});
+    b.onclick = () => {
+      haptic();
+      b.classList.toggle('on');  // muda na hora; a resposta do aparelho confirma no redesenho
+      tg.apply({[it.dp]: !tg.get().on});
+    };
     if (it.watts != null) {  // tomada: ⏻ ao lado da potência de agora
       body.append(el('div', {className: 'power-row'}, b, el('div', {className: 'now'},
         el('div', {className: 'big', textContent: it.on ? `${num(it.watts, 1)} W` : '—'}),
@@ -468,10 +482,9 @@ function renderDevice(tg, extra = []) {
   }
   if (tg.timer && it.timer_dp) {
     const left = Math.ceil((it.dps[it.timer_dp] || 0) / 60);
-    const label = left ? `${it.on ? 'Desliga' : 'Liga'} em ${left} min` : (it.on ? 'Desligar em' : 'Ligar em');
     const opts = TIMERS.map(m => ({label: m < 60 ? `${m} min` : `${m / 60} h`, pick: () => tg.apply({[it.timer_dp]: m * 60})}));
     if (left) opts.push({label: 'Cancelar', pick: () => tg.apply({[it.timer_dp]: 0})});
-    body.append(el('div', {className: 'row-title', textContent: '⏱ ' + label}), chipRow(opts));
+    body.append(disclosure('timer', it.on ? 'Desligar em' : 'Ligar em', left ? `${left} min` : '', box => box.append(chipRow(opts))));
   }
   if (tg.timer && it.watts != null) body.append(historySection(it));  // tomadas: só no cartão real, não no editor de cena
 }
@@ -498,20 +511,21 @@ function brightPill(tg) {
     $('c-sub').textContent = pct ? `${pct}%` : '';
   });
   p.addEventListener('pointerup', () => {
-    if (y0 !== null && !moved) tg.apply({[it.dp]: !tg.get().on});  // toque sem arrastar = liga/desliga
+    if (y0 !== null && !moved) { haptic(); tg.apply({[it.dp]: !tg.get().on}); }  // toque sem arrastar = liga/desliga
     else if (y0 !== null) tg.dragEnd();
     y0 = null;
   });
   return p;
 }
 
-function swatchRow(items, tg) {
+function swatchRow(items, tg, after = []) {
   const row = el('div', {className: 'swatches'});
-  for (const s of items) {
-    const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: s.pick});
+  const add = s => {
+    const b = el('button', {className: 'sw' + (s.sel ? ' sel' : ''), onclick: () => { haptic(); s.pick(); }});
     b.style.setProperty('--c', s.c);
     row.append(b);
-  }
+  };
+  items.forEach(add);
   if (tg) {  // cor livre
     const input = el('input', {type: 'color', value: '#ff8800'});
     const label = el('label', {className: 'sw custom', title: 'Outra cor'}, input);
@@ -527,12 +541,14 @@ function swatchRow(items, tg) {
     });
     row.append(label);
   }
+  after.forEach(add);
   return row;
 }
 
 function chipRow(items) {
   const row = el('div', {className: 'chips'});
-  for (const c of items) row.append(el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label, onclick: c.pick}));
+  for (const c of items) row.append(el('button', {className: 'chip' + (c.sel ? ' sel' : ''), textContent: c.label,
+                                                 onclick: () => { haptic(); c.pick(); }}));
   return row;
 }
 
@@ -546,27 +562,55 @@ const niceMax = v => { if (!(v > 0)) return 1; const p = 10 ** Math.floor(Math.l
 // retraída por padrão: o cabeçalho abre e fecha; o histórico só é buscado aberto.
 // O estado vive em `current`, então sobrevive aos redesenhos do cartão e zera ao fechar o cartão.
 function historySection(it) {
-  const wrap = el('details', {className: 'hist', open: !!current.histOpen});
-  wrap.append(el('summary', {className: 'row-title', textContent: 'Consumo'}));
-  wrap.addEventListener('toggle', () => {
-    if (current?.id !== it.id || wrap.open === !!current.histOpen) return;
-    current.histOpen = wrap.open;
-    redraw();
-  });
-  if (!wrap.open) return wrap;
+  return disclosure('hist', 'Consumo', '', box => fillHistory(it, box));
+}
+function fillHistory(it, wrap) {
+  wrap.classList.add('hist');
   const range = current.range ??= '24h';
   const chips = chipRow(Object.entries(RANGE_LABEL).map(([k, label]) => ({label, sel: k === range,
     pick: () => { current.range = k; redraw(); }})));
-  const stats = el('div', {className: 'hist-stats'}), readout = el('div', {className: 'hist-readout'});
-  wrap.append(chips, stats, readout);
+  const stats = el('div', {className: 'hist-stats', textContent: ' '}), readout = el('div', {className: 'hist-readout'});
+  const plot = el('div', {className: 'hist-plot'});  // altura do gráfico reservada antes de o dado chegar
+  wrap.append(chips, stats, readout, plot);
   fetch(`/api/history/${it.id}?range=${range}`).then(r => r.json()).then(h => {
     if (current?.id !== it.id || current.range !== range) return;  // o cartão mudou enquanto buscava
     if (!h.points.length) { stats.textContent = 'Sem dados ainda: o histórico começa a contar agora.'; return; }
     stats.textContent = `${num(h.kwh, 2)} kWh · média ${num(h.avg_w, 0)} W`;
-    wrap.append(h.unit === 'kWh' ? dayBars(h, readout) : powerArea(h, readout), dataTable(h));
-    lockScroll(true);  // o cartão cresceu
+    plot.append(h.unit === 'kWh' ? dayBars(h, readout) : powerArea(h, readout), dataTable(h));
   }).catch(() => { stats.textContent = 'Não consegui carregar o histórico.'; });
-  return wrap;
+}
+
+// linha retrátil (Efeitos, Desligar em, Consumo): o cabeçalho mostra o estado; tocar abre/fecha animando a altura.
+// O conteúdo só é montado na primeira abertura; o que está aberto fica em current.open e sobrevive aos redesenhos.
+function disclosure(key, title, detail, build) {
+  const open = !!current.open?.has(key);
+  const head = el('button', {className: 'disc-head' + (open ? ' open' : '')},
+    el('span', {textContent: title}), el('span', {className: 'disc-detail', textContent: detail || ''}), icon('chev', 16));
+  head.setAttribute('aria-expanded', String(open));
+  const box = el('div', {className: 'disc-body', hidden: !open});
+  let built = open;
+  if (open) build(box);
+  head.onclick = () => {
+    haptic();
+    const opening = box.hidden;
+    (current.open ??= new Set())[opening ? 'add' : 'delete'](key);
+    head.classList.toggle('open', opening);
+    head.setAttribute('aria-expanded', String(opening));
+    if (opening) {
+      if (!built) { build(box); built = true; }
+      box.hidden = false;
+      box.classList.add('anim');
+      box.animate([{height: '0px', opacity: 0}, {height: box.scrollHeight + 'px', opacity: 1}],
+                  {duration: 320, easing: 'cubic-bezier(.2, .9, .25, 1)'}).onfinish = () => { box.classList.remove('anim'); lockScroll(true); };
+    } else {
+      box.classList.add('anim');
+      box.animate([{height: box.scrollHeight + 'px', opacity: 1}, {height: '0px', opacity: 0}],
+                  {duration: 240, easing: 'cubic-bezier(.3, 0, .2, 1)'}).onfinish = () => {
+        box.hidden = true; box.classList.remove('anim'); lockScroll(true);
+      };
+    }
+  };
+  return el('div', {className: 'disc'}, head, box);
 }
 
 // geometria comum: 340×150 no viewBox, escala uniforme com o cartão
@@ -764,6 +808,16 @@ async function saveScenes(next) {
     return false;
   }
 }
+
+// toque háptico: o Safari do iOS não implementa navigator.vibrate; a partir do iOS 18, alternar um
+// <input type=checkbox switch> dá o toque do sistema. Onde nenhum dos dois existe, não faz nada.
+const hapticLabel = el('label', {className: 'sr-only', ariaHidden: 'true'}, el('input', {type: 'checkbox'}));
+hapticLabel.firstChild.setAttribute('switch', '');
+document.body.append(hapticLabel);
+function haptic() { if (navigator.vibrate) navigator.vibrate(8); else hapticLabel.click(); }
+
+// sem um ouvinte de touchstart o Safari do iOS não aplica :active, e nenhum botão "afunda" ao toque
+document.addEventListener('touchstart', () => {}, {passive: true});
 
 // reforço do user-select: none no iOS, menos no campo de nome da cena
 document.addEventListener('selectstart', e => { if (!e.target.closest?.('input')) e.preventDefault(); });
