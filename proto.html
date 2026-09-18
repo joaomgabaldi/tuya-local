@@ -24,7 +24,7 @@
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
 
   .tile { position: relative; box-sizing: border-box; height: 72px; padding: 10px 12px; border-radius: 16px;
-          background: var(--tile); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+          background: var(--tile);
           display: flex; align-items: center; gap: 10px; cursor: pointer; touch-action: manipulation;
           -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
           transition: transform .18s var(--ease), background .2s; }
@@ -40,8 +40,12 @@
 
   /* cartão expandido */
   html.locked, html.locked body { overflow: hidden; }
-  #overlay { position: fixed; inset: 0; touch-action: none; background: rgb(0 0 0 / .35);
-             backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4); }
+  /* o desfoque é no próprio conteúdo, não numa camada fixa por cima: o Safari desenha a página embaixo da
+     Dynamic Island e da barra de URL, e uma camada fixa escura virava faixas pretas nessas áreas.
+     O #overlay fica transparente e só serve para capturar o toque fora do cartão. */
+  #overlay { position: fixed; inset: 0; touch-action: none; }
+  .aviso, h1, main { transition: filter .3s; }
+  html.blurred .aviso, html.blurred h1, html.blurred main { filter: blur(18px) brightness(.55) saturate(1.3); }
   #card { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 32px));
           height: fit-content; max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain;
           border-radius: 28px; background: var(--card); transform-origin: 0 0; padding: 0 20px 22px; }
@@ -191,7 +195,7 @@ function openCard(d) {
   grow.onfinish = () => { if (current === d) d.tile.style.visibility = ''; };  // fechou antes de terminar: não reaparece
   for (const part of contentParts())
     part.animate([{opacity: 0}, {opacity: 1}], {duration: 220, delay: 180, fill: 'backwards'});
-  $('overlay').animate([{opacity: 0}, {opacity: 1}], {duration: 300});
+  document.documentElement.classList.add('blurred');
   d.tile.style.visibility = 'hidden';
 }
 function closeCard(fromY = 0) {
@@ -208,12 +212,12 @@ function closeCard(fromY = 0) {
   for (const part of contentParts()) part.animate([{opacity: 1}, {opacity: 0}], {duration: 90, fill: 'forwards'});
   const a = card.animate([{transform: start, borderRadius: '28px'}, flipFrom(to)],
                          {duration: 340, delay: 60, easing: 'cubic-bezier(.3, 0, .2, 1)', fill: 'forwards'});
-  $('overlay').animate([{opacity: 1}, {opacity: 0}], {duration: 340, delay: 60, fill: 'forwards'});
+  document.documentElement.classList.remove('blurred');
   a.onfinish = () => {  // fill: forwards segura o último quadro; sem ele o cartão grande piscava antes de sumir
     lockScroll(false);
     d.tile.style.visibility = '';
     card.hidden = $('overlay').hidden = true;
-    [card, $('overlay'), ...contentParts()].flatMap(x => x.getAnimations()).forEach(x => x.cancel());
+    [card, ...contentParts()].flatMap(x => x.getAnimations()).forEach(x => x.cancel());
   };
 }
 $('overlay').addEventListener('click', () => closeCard());
