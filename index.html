@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Casa">
+<meta name="theme-color" content="#111111">
+<link rel="manifest" href="/manifest.json">
+<title>Casa</title>
+<style>
+  :root { color-scheme: dark; --bg: #111; --off: #242424; --on: #f5c542; --txt: #eee; }
+  body { margin: 0; padding: 16px; padding-top: max(16px, env(safe-area-inset-top));
+         background: var(--bg); color: var(--txt); font: 16px -apple-system, system-ui, sans-serif; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; margin: 20px 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+  button { all: unset; box-sizing: border-box; min-height: 84px; padding: 12px; border-radius: 14px;
+           background: var(--off); display: flex; flex-direction: column; justify-content: space-between;
+           cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  button:focus-visible { outline: 2px solid var(--on); }
+  button.on { background: var(--on); color: #111; }
+  button.offline { opacity: .35; pointer-events: none; }
+  button.busy { opacity: .6; }
+  small { opacity: .75; font-size: 13px; }
+  #erro { color: #f77; min-height: 1.2em; }
+</style>
+</head>
+<body>
+<div id="erro" role="status"></div>
+<main id="app"></main>
+<script>
+const app = document.getElementById('app'), erro = document.getElementById('erro');
+const busy = new Set();
+let last = [];
+
+function render() {
+  app.replaceChildren();
+  let grid;
+  for (const it of last) {
+    if (!grid || grid.dataset.group !== it.group) {
+      const h = document.createElement('h2');
+      h.textContent = it.group;
+      grid = document.createElement('div');
+      grid.className = 'grid';
+      grid.dataset.group = it.group;
+      app.append(h, grid);
+    }
+    const b = document.createElement('button');
+    b.className = [it.on && 'on', !it.online && 'offline', busy.has(it.id) && 'busy'].filter(Boolean).join(' ');
+    b.setAttribute('aria-pressed', String(!!it.on));
+    const name = document.createElement('span');
+    name.textContent = it.name;
+    const status = document.createElement('small');
+    status.textContent = !it.online ? 'offline'
+      : it.watts != null ? `${it.watts.toFixed(1)} W`
+      : it.on ? 'ligado' : 'desligado';
+    b.append(name, status);
+    b.onclick = () => toggle(it);
+    grid.append(b);
+  }
+}
+
+async function load() {
+  try {
+    const r = await fetch('/api/state');
+    last = await r.json();
+    erro.textContent = '';
+    render();
+  } catch (e) {
+    erro.textContent = 'Sem conexão com o servidor';
+  }
+}
+
+async function toggle(it) {
+  if (busy.has(it.id)) return;
+  busy.add(it.id);
+  render();
+  try {
+    const r = await fetch('/api/set/' + it.id, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({dp: it.dp, value: !it.on}),
+    });
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error);
+    last = last.map(x => x.id === body.id ? body : x);
+    erro.textContent = '';
+  } catch (e) {
+    erro.textContent = `${it.name}: ${e.message}`;
+  }
+  busy.delete(it.id);
+  render();
+}
+
+let timer;
+function start() {
+  clearInterval(timer);
+  if (!document.hidden) { load(); timer = setInterval(load, 5000); }
+}
+document.addEventListener('visibilitychange', start);
+start();
+</script>
+</body>
+</html>
