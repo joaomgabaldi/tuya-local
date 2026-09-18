@@ -2,6 +2,7 @@
 """Página de liga/desliga dos aparelhos Tuya pela LAN (spec em docs/superpowers/specs)."""
 import sys
 import json
+import mimetypes
 import sqlite3
 import threading
 from contextlib import closing
@@ -231,14 +232,17 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         files = {"/": ("index.html", "text/html; charset=utf-8"),
                  "/manifest.json": ("manifest.json", "application/manifest+json"),
-                 "/codec.js": ("codec.js", "text/javascript; charset=utf-8"),
-                 "/icon-180.png": ("icon-180.png", "image/png"),
-                 "/icon-512.png": ("icon-512.png", "image/png"),
-                 "/favicon.png": ("favicon.png", "image/png")}
+                 "/codec.js": ("codec.js", "text/javascript; charset=utf-8")}
         path = self.path.split("?")[0]
         if path in files:
             name, ctype = files[path]
             return self.reply(200, (DIR / name).read_bytes(), ctype)
+        if path.startswith("/icons/web/"):  # ícones do João; só arquivos dessa pasta, sem subir de diretório
+            base = (DIR / "icons" / "web").resolve()
+            f = (base / path.removeprefix("/icons/web/")).resolve()
+            if f.parent == base and f.is_file():
+                return self.reply(200, f.read_bytes(), mimetypes.guess_type(f.name)[0] or "application/octet-stream")
+            return self.reply(404, {"error": "não encontrado"})
         if path == "/api/state":
             return self.reply(200, [view(DEVS[i], CACHE[i]) for i in DEVS])
         if path == "/api/scenes":
