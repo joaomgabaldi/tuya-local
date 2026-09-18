@@ -39,7 +39,8 @@
   .tile .sub { font-size: 13px; color: var(--sub); }
 
   /* cartão expandido */
-  #overlay { position: fixed; inset: 0; background: rgb(0 0 0 / .35);
+  html.locked, html.locked body { overflow: hidden; }
+  #overlay { position: fixed; inset: 0; touch-action: none; background: rgb(0 0 0 / .35);
              backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4); }
   #card { position: fixed; inset: 0; margin: auto; box-sizing: border-box; width: min(380px, calc(100vw - 32px));
           height: fit-content; max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain;
@@ -111,12 +112,12 @@ function colorOf(d) {
   return `hsl(${d.h} ${d.s}% 58%)`;
 }
 function status(d) {
+  // ligado/desligado já aparece no bloco aceso e no ícone; o texto fica só para o que é especial
   if (d.offline) return 'Sem resposta';
   const parts = [];
-  if (d.kind === 'plug') parts.push(`${d.watts.toFixed(1).replace('.', ',')} W`);
-  else if (!d.on) parts.push('Desligado');
-  else if (d.kind === 'switch') parts.push('Ligado');
-  else parts.push(d.mode === 'scene' ? EFFECTS[d.scene] : `${Math.round(d.bright)}%`);
+  if (d.on && d.kind === 'plug') parts.push(`${d.watts.toFixed(1).replace('.', ',')} W`);
+  if (d.on && (d.kind === 'lamp' || d.kind === 'strip'))
+    parts.push(d.mode === 'scene' ? EFFECTS[d.scene] : `${Math.round(d.bright)}%`);
   if (d.timer) parts.push(`⏱ ${d.timer} min`);
   return parts.join(' · ');
 }
@@ -158,6 +159,13 @@ function longPress(t, onTap, onHold) {
 
 // ---- cartão expandido (FLIP: nasce do retângulo do bloco) ----
 let current = null;
+// com o cartão aberto o fundo não rola. Cartão sem rolagem própria só aceita gesto horizontal (a fileira
+// de efeitos); o vertical "vazava" para a página desfocada atrás.
+function lockScroll(on) {
+  document.documentElement.classList.toggle('locked', on);
+  const card = $('card');
+  card.style.touchAction = on && card.scrollHeight <= card.clientHeight ? 'pan-x' : '';
+}
 // keyframe que põe o cartão exatamente sobre `rect` (o bloco). O raio é dividido pela escala
 // de cada eixo para o canto continuar redondo em vez de virar elipse esticada.
 function flipFrom(rect, radius = 16) {
@@ -171,6 +179,7 @@ function openCard(d) {
   current = d;
   renderCard();
   $('overlay').hidden = $('card').hidden = false;
+  lockScroll(true);
   const from = d.tile.getBoundingClientRect();
   $('card').animate([flipFrom(from), {transform: 'none', borderRadius: '28px'}],
                     {duration: 420, easing: 'cubic-bezier(.2, .9, .25, 1.04)'});
@@ -195,6 +204,7 @@ function closeCard(fromY = 0) {
                          {duration: 340, delay: 60, easing: 'cubic-bezier(.3, 0, .2, 1)', fill: 'forwards'});
   $('overlay').animate([{opacity: 1}, {opacity: 0}], {duration: 340, delay: 60, fill: 'forwards'});
   a.onfinish = () => {  // fill: forwards segura o último quadro; sem ele o cartão grande piscava antes de sumir
+    lockScroll(false);
     d.tile.style.visibility = '';
     card.hidden = $('overlay').hidden = true;
     [card, $('overlay'), ...contentParts()].flatMap(x => x.getAnimations()).forEach(x => x.cancel());
@@ -296,9 +306,9 @@ function swatchRow(items, d, custom) {
   if (custom) {
     const input = el('input', {type: 'color', value: '#ff8800'});
     const label = el('label', {className: 'sw custom' + (d.custom && d.mode === 'colour' ? ' sel' : ''), title: 'Outra cor'}, input);
-    // o seletor nativo do iOS fica preso a ESTE elemento: redesenhar o cartão aqui derrubava o Safari (SIGABRT).
-    // então só atualiza estado e pinta no lugar, sem renderCard().
-    input.addEventListener('input', () => {
+    // aplica só quando o seletor fecha ('change'): a janela do iOS já mostra a cor escolhida enquanto arrasta.
+    // e mesmo assim sem renderCard(): recriar o input preso ao seletor nativo derrubava o Safari (SIGABRT).
+    input.addEventListener('change', () => {
       const [r, g, b] = [1, 3, 5].map(i => parseInt(input.value.slice(i, i + 2), 16) / 255);
       const max = Math.max(r, g, b), min = Math.min(r, g, b), c = max - min;
       const h = c === 0 ? 0 : max === r ? 60 * (((g - b) / c) % 6) : max === g ? 60 * ((b - r) / c + 2) : 60 * ((r - g) / c + 4);
