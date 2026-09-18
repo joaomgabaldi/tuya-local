@@ -9,8 +9,11 @@ um bloco por aparelho Tuya. Tocar alterna liga/desliga. Fala direto com os
 aparelhos pela LAN via tinytuya, sem o app da Tuya. Nuvem e controle local
 convivem; nada é bloqueado no DNS.
 
-Fora de escopo nesta versão: brilho, cor, cenas, timers, autenticação,
-acesso fora da LAN, histórico de consumo.
+Ficam para as próximas versões, que já estão certas: brilho, cor, cenas,
+timers, autenticação, acesso fora da LAN e histórico de consumo. A v1 não
+implementa nenhum deles, mas também não pode atrapalhar a entrada deles.
+Por isso o cache guarda os DPs crus e a escrita é genérica (ver
+"Preparado para as próximas versões").
 
 ## Aparelhos
 
@@ -45,7 +48,8 @@ Três arquivos em `~/homelab/tuya-local/`:
 
 - Carrega o `devices.json`, filtra pelas 4 categorias e cria um
   `tinytuya.Device` por aparelho (timeout de socket 3 s, 1 tentativa).
-- **Cache em memória:** `{id: {on, online, watts}}`.
+- **Cache em memória:** `{id: {online, dps}}`, com todos os DPs crus que o
+  aparelho devolve. `on` e `watts` são calculados na hora de responder.
 - **Poll:** thread daemon que percorre os aparelhos em sequência e dorme 10 s
   entre as voltas. Um aparelho que falha fica `online: false` e não
   atrasa os outros além do próprio timeout.
@@ -55,11 +59,13 @@ Três arquivos em `~/homelab/tuya-local/`:
   Se o tempo de resposta incomodar, trocar por um lock por aparelho.
 - **Endpoints:**
   - `GET /` → `index.html`; `GET /manifest.json`.
-  - `GET /api/state` → lista `[{id, name, group, on, online, watts}]` na
-    ordem dos grupos acima e alfabética dentro deles.
-  - `POST /api/toggle/<id>` → `set_value(dp, not on)`, atualiza o cache
-    com a resposta do aparelho e devolve o item. Erro do aparelho → 502
-    com a mensagem do tinytuya.
+  - `GET /api/state` → lista `[{id, name, group, on, online, watts, dps}]`
+    na ordem dos grupos acima e alfabética dentro deles.
+  - `POST /api/set/<id>` com corpo `{"dp": "20", "value": true}` →
+    `set_value(dp, value)`, atualiza o cache com a resposta do aparelho e
+    devolve o item. Na v1 a página só manda o DP de liga/desliga. Erro do
+    aparelho → 502 com a mensagem do tinytuya. Um DP que não está no
+    `mapping` do aparelho → 400.
 - Escuta só em `192.168.0.2:8090` (IP da LAN do host). Não escuta no
   Tailscale nem na internet.
 
@@ -68,13 +74,30 @@ Três arquivos em `~/homelab/tuya-local/`:
 - Grade de blocos grandes, com título de cada grupo. O bloco ligado fica
   aceso, o offline fica apagado e não aceita toque. As tomadas mostram os
   watts.
-- Tocar faz `POST /api/toggle/<id>`. O bloco fica em "aguardando" até a
+- Tocar faz `POST /api/set/<id>` com o DP de liga/desliga e `!on`. O bloco fica em "aguardando" até a
   resposta e mostra o erro se falhar.
 - Busca `/api/state` a cada 5 s enquanto a aba está visível
   (`visibilitychange`).
 - Meta tags para o iOS (`apple-mobile-web-app-capable`, viewport) e o
   link para o manifest. Sem service worker e sem ícone próprio por
   enquanto.
+
+## Preparado para as próximas versões
+
+A v1 já deixa estas portas abertas, sem implementar nada além disso:
+
+- **Brilho, cor e cenas:** o servidor já aceita qualquer DP do `mapping`,
+  e o `/api/state` já entrega os DPs crus. Adicionar esses controles é
+  trabalho só da página. O `mapping` do `devices.json` traz os limites
+  (`bright_value_v2` 10–1000, `colour_data_v2` em HSV etc.).
+- **Timers:** os aparelhos já têm `countdown_1` / DP `26`. Isso cabe no
+  mesmo `/api/set`.
+- **Autenticação e acesso fora da LAN:** mudam juntos. O candidato
+  natural é passar a escutar também no Tailscale (100.68.157.30) e
+  adicionar a autenticação nesse momento, não antes.
+- **Histórico de consumo:** o poll já lê `cur_power` a cada 10 s. Gravar
+  num SQLite, no mesmo padrão do `/opt/scripts/telemetria.db`, é um passo
+  a mais no mesmo loop.
 
 ## Operação
 
@@ -99,6 +122,7 @@ Três arquivos em `~/homelab/tuya-local/`:
 ## Testes
 
 - `python app.py --selftest`: `assert`s na tabela categoria → (grupo, DP),
-  no filtro que exclui os IR e na conversão de watts.
+  no filtro que exclui os IR, na conversão de watts e na recusa de DP
+  fora do `mapping`.
 - Aceitação manual: todos os blocos aparecem, e tocar em cada grupo liga e
   desliga de verdade. A Lavanderia aparece depois que o João reiniciar ela.
